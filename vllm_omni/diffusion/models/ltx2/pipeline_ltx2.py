@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from diffusers import AutoencoderKLLTX2Audio, AutoencoderKLLTX2Video, FlowMatchEulerDiscreteScheduler
 from diffusers.pipelines.ltx2 import LTX2TextConnectors
+from diffusers.pipelines.ltx2.utils import STAGE_2_DISTILLED_SIGMA_VALUES
 from diffusers.pipelines.ltx2.vocoder import LTX2Vocoder
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg, retrieve_timesteps
 from diffusers.utils.torch_utils import randn_tensor
@@ -1174,3 +1175,115 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights)
+
+
+class LTX2TwoStagesPipeline(nn.Module):
+    def __init__(
+        self,
+        *,
+        od_config: OmniDiffusionConfig,
+        prefix: str = "",
+    ):
+        super().__init__()
+
+        self.model_path = od_config.model
+        self.distilled = False
+        if "distilled" in os.path.basename(model_path):
+            self.distilled = True
+
+        self.pipe = LTX2Pipeline(od_config=od_config, prefix=prefix)
+        self.upsample_pipe = LTX2LatentUpsamplePipeline(vae=self.pipe.vae, od_config=od_config,)
+
+    def forward(
+        self,
+        req: OmniDiffusionRequest,
+        prompt: str | list[str] | None = None,
+        negative_prompt: str | list[str] | None = None,
+        height: int | None = None,
+        width: int | None = None,
+        num_frames: int | None = None,
+        frame_rate: float | None = None,
+        num_inference_steps: int | None = None,
+        timesteps: list[int] | None = None,
+        guidance_scale: float = 4.0,
+        guidance_rescale: float = 0.0,
+        num_videos_per_prompt: int | None = 1,
+        generator: torch.Generator | list[torch.Generator] | None = None,
+        latents: torch.Tensor | None = None,
+        audio_latents: torch.Tensor | None = None,
+        prompt_embeds: torch.Tensor | None = None,
+        negative_prompt_embeds: torch.Tensor | None = None,
+        prompt_attention_mask: torch.Tensor | None = None,
+        negative_prompt_attention_mask: torch.Tensor | None = None,
+        decode_timestep: float | list[float] = 0.0,
+        decode_noise_scale: float | list[float] | None = None,
+        output_type: str = "np",
+        return_dict: bool = True,
+        attention_kwargs: dict[str, Any] | None = None,
+        max_sequence_length: int | None = None,
+    ):
+        video_latent, audio_latent = self.pipe(
+            req=req,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            frame_rate=frame_rate,
+            num_inference_steps=num_inference_steps,
+            timesteps=timesteps,
+            guidance_scale=guidance_scale,
+            guidance_rescale=guidance_rescale,
+            num_videos_per_prompt=num_videos_per_prompt,
+            generator=generator,
+            latents=latents,
+            audio_latents=audio_latents,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            prompt_attention_mask=prompt_attention_mask,
+            negative_prompt_attention_mask=negative_prompt_attention_mask,
+            decode_timestep=decode_timestep,
+            decode_noise_scale=decode_noise_scale,
+            output_type=output_type,
+            return_dict=return_dict,
+            attention_kwargs=attention_kwargs,
+            max_sequence_length=max_sequence_length,
+        )
+
+        upscaled_video_latent = self.upsample_pipe(
+            latents=video_latent,
+            output_type="latent",
+            return_dict=False,
+        )[0]
+
+        if self.distilled:
+            # Load Stage 2 distilled LoRA
+            self.pipe.load_lora_weights(
+                self.model_path,
+                adapter_name="stage_2_distilled",
+                weight_name="ltx-2-19b-distilled-lora-384.safetensors"
+            )
+            self.pipe.set_adapters("stage_2_distilled", 1.0)
+            # Change scheduler to use Stage 2 distilled sigmas as is
+            new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
+                pipe.scheduler.config,
+                use_dynamic_shifting=False,
+                shift_terminal=None,
+            )
+            self.pipe.scheduler = new_scheduler
+
+        video, audio = self.pipe(
+            latents=upscaled_video_latent,
+            audio_latents=audio_latent,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_inference_steps=3,
+            noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
+            sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
+            guidance_scale=1.0,
+            generator=generator,
+            output_type="np",
+            return_dict=False,
+        )
+
+        return DiffusionOutput(output=(video, audio))
