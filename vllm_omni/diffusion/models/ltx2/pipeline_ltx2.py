@@ -11,7 +11,6 @@ import os
 from collections.abc import Iterable
 from contextlib import nullcontext
 from typing import Any
-from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -23,6 +22,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import resca
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from torch import nn
+from tqdm import tqdm
 from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
@@ -34,9 +34,9 @@ from vllm_omni.diffusion.distributed.parallel_state import (
     get_classifier_free_guidance_world_size,
 )
 from vllm_omni.diffusion.distributed.utils import get_local_device
+from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.request import OmniDiffusionRequest
-from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
 from vllm_omni.lora.request import LoRARequest
 
 from .ltx2_transformer import LTX2VideoTransformer3DModel
@@ -504,7 +504,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
 
     @staticmethod
     def _create_noised_state(
-        latents: torch.Tensor, noise_scale: Union[float, torch.Tensor], generator: Optional[torch.Generator] = None
+        latents: torch.Tensor, noise_scale: float | torch.Tensor, generator: torch.Generator | None = None
     ):
         noise = randn_tensor(latents.shape, generator=generator, device=latents.device, dtype=latents.dtype)
         noised_latents = noise_scale * noise + (1 - noise_scale) * latents
@@ -566,7 +566,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
                 )
             if latents.ndim != 3:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]."
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]." #noqa
                 )
             latents = self._create_noised_state(latents, noise_scale, generator)
             return latents.to(device=device, dtype=dtype)
@@ -606,12 +606,12 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
                 latents = self._pack_audio_latents(latents)
             if latents.ndim != 3:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]."
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]." # noqa
                 )
             latents = self._normalize_audio_latents(latents, self.audio_vae.latents_mean, self.audio_vae.latents_std)
             latents = self._create_noised_state(latents, noise_scale, generator)
             return latents.to(device=device, dtype=dtype)
-        
+
         # TODO: confirm whether this logic is correct
         latent_mel_bins = num_mel_bins // self.audio_vae_mel_compression_ratio
 
@@ -972,7 +972,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
         if latents is not None:
             if latents.ndim == 5:
                 logger.info(
-                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred."
+                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred." # noqa
                 )
                 _, _, latent_num_frames, latent_height, latent_width = latents.shape  # [B, C, F, H, W]
             elif latents.ndim == 3:
@@ -982,7 +982,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
                 )
             else:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]."
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]." # noqa
                 )
         video_sequence_length = latent_num_frames * latent_height * latent_width
 
@@ -1008,7 +1008,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
         if audio_latents is not None:
             if audio_latents.ndim == 4:
                 logger.info(
-                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred."
+                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred." # noqa
                 )
                 _, _, audio_num_frames, _ = audio_latents.shape  # [B, C, L, M]
             elif audio_latents.ndim == 3:
@@ -1018,7 +1018,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
                 )
             else:
                 raise ValueError(
-                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]."
+                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]." # noqa
                 )
 
         num_mel_bins = self.audio_vae.config.mel_bins if getattr(self, "audio_vae", None) is not None else 64
@@ -1077,7 +1077,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
         if self.do_classifier_free_guidance:
             video_coords = video_coords.repeat((2,) + (1,) * (video_coords.ndim - 1))  # Repeat twice in batch dim
             audio_coords = audio_coords.repeat((2,) + (1,) * (audio_coords.ndim - 1))
-            
+
         for i, t in enumerate(tqdm(timesteps)):
             if self.interrupt:
                 continue
@@ -1314,6 +1314,7 @@ class LTX2TwoStagesPipeline(nn.Module):
         timesteps: list[int] | None = None,
         guidance_scale: float = 4.0,
         guidance_rescale: float = 0.0,
+        noise_scale: float = 0.0,
         num_videos_per_prompt: int | None = 1,
         generator: torch.Generator | list[torch.Generator] | None = None,
         latents: torch.Tensor | None = None,
@@ -1377,7 +1378,7 @@ class LTX2TwoStagesPipeline(nn.Module):
 
             # Change scheduler to use Stage 2 distilled sigmas as is
             new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-                pipe.scheduler.config,
+                self.pipe.scheduler.config,
                 use_dynamic_shifting=False,
                 shift_terminal=None,
             )
@@ -1400,7 +1401,7 @@ class LTX2TwoStagesPipeline(nn.Module):
         ).output
 
         return DiffusionOutput(output=(video, audio))
-    
+
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights)

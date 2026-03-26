@@ -3,26 +3,32 @@
 
 from __future__ import annotations
 
-import os
 import copy
+import logging
+import os
+from collections.abc import Iterable
 from typing import Any
-from tqdm import tqdm
 
 import numpy as np
 import PIL.Image
 import torch
 import torch.nn as nn
+from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES, STAGE_2_DISTILLED_SIGMA_VALUES
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg, retrieve_timesteps
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_latents
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
+from tqdm import tqdm
+from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.parallel_state import get_cfg_group, get_classifier_free_guidance_rank
-from vllm_omni.diffusion.request import OmniDiffusionRequest
-from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
-from vllm_omni.lora.request import LoRARequest
 from vllm_omni.diffusion.distributed.utils import get_local_device
+from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
+from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
+from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.lora.request import LoRARequest
 
 from .pipeline_ltx2 import (
     LTX2Pipeline,
@@ -32,6 +38,9 @@ from .pipeline_ltx2 import (
 from .pipeline_ltx2 import (
     get_ltx2_post_process_func as _get_ltx2_post_process_func,
 )
+from .pipeline_ltx2_latent_upsample import LTX2LatentUpsamplePipeline
+
+logger = logging.getLogger(__name__)
 
 
 def get_ltx2_post_process_func(od_config: OmniDiffusionConfig):
@@ -95,7 +104,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 # latents are of shape [B, C, F, H, W], need to be packed
                 latents = self._pack_latents(
                     latents, self.transformer_spatial_patch_size, self.transformer_temporal_patch_size
-                )  
+                )
             else:
                 conditioning_mask = latents.new_zeros(mask_shape)
                 conditioning_mask[:, :, 0] = 1.0
@@ -447,14 +456,14 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 negative_additive_attention_mask,
                 additive_mask=True,
             )
-        
+
         latent_num_frames = (num_frames - 1) // self.vae_temporal_compression_ratio + 1
         latent_height = height // self.vae_spatial_compression_ratio
         latent_width = width // self.vae_spatial_compression_ratio
         if latents is not None:
             if latents.ndim == 5:
                 logger.info(
-                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred."
+                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred." # noqa
                 )
                 _, _, latent_num_frames, latent_height, latent_width = latents.shape  # [B, C, F, H, W]
             elif latents.ndim == 3:
@@ -464,7 +473,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 )
             else:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]."
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]." # noqa
                 )
         video_sequence_length = latent_num_frames * latent_height * latent_width
 
@@ -494,7 +503,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
         )
         if self.do_classifier_free_guidance and not cfg_parallel_ready:
             conditioning_mask = torch.cat([conditioning_mask, conditioning_mask])
-        
+
         duration_s = num_frames / frame_rate
         audio_latents_per_second = (
             self.audio_sampling_rate / self.audio_hop_length / float(self.audio_vae_temporal_compression_ratio)
@@ -503,7 +512,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
         if audio_latents is not None:
             if audio_latents.ndim == 4:
                 logger.info(
-                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred."
+                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred." # noqa
                 )
                 _, _, audio_num_frames, _ = audio_latents.shape  # [B, C, L, M]
             elif audio_latents.ndim == 3:
@@ -513,7 +522,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 )
             else:
                 raise ValueError(
-                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]."
+                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]." # noqa
                 )
 
         num_mel_bins = self.audio_vae.config.mel_bins if getattr(self, "audio_vae", None) is not None else 64
@@ -894,7 +903,7 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
 
             # Change scheduler to use Stage 2 distilled sigmas as is
             new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-                pipe.scheduler.config,
+                self.pipe.scheduler.config,
                 use_dynamic_shifting=False,
                 shift_terminal=None,
             )
@@ -917,7 +926,7 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
         ).output
 
         return DiffusionOutput(output=(video, audio))
-    
+
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights)

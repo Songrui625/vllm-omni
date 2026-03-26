@@ -9,10 +9,9 @@ from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_latents
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
-from vllm_omni.diffusion.distributed.utils import get_local_device
-
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.utils import get_local_device
 
 logger = logging.getLogger(__name__)
 
