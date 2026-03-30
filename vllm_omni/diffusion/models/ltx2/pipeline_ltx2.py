@@ -1027,6 +1027,19 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin):
         num_channels_latents_audio = (
             self.audio_vae.config.latent_channels if getattr(self, "audio_vae", None) is not None else 8
         )
+
+        # padding audio_latents if needed
+        sp_size = getattr(self.od_config.parallel_config, "sequence_parallel_size", 1)
+        if sp_size > 1:
+            pad_len = (sp_size - (audio_num_frames% sp_size)) % sp_size
+            if pad_len > 0:
+                if audio_latents is not None:
+                    pad_shape = list(latents.shape)
+                    pad_shape[2] = pad_len
+                    padding = torch.zeros(pad_shape, dtype=audio_latents.dtype, device=audio_latents.device)
+                    audio_latents = torch.cat([audio_latents, padding], dim=2)
+                audio_num_frames += pad_len
+
         audio_latents = self.prepare_audio_latents(
             batch_size * num_videos_per_prompt,
             num_channels_latents=num_channels_latents_audio,
