@@ -566,7 +566,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
                 )
             if latents.ndim != 3:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]." #noqa
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]."  # noqa
                 )
             latents = self._create_noised_state(latents, noise_scale, generator)
             return latents.to(device=device, dtype=dtype)
@@ -592,7 +592,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
         self,
         batch_size: int = 1,
         num_channels_latents: int = 8,
-        audio_latent_length: int = 1, # 1 is just a dummy value
+        audio_latent_length: int = 1,  # 1 is just a dummy value
         num_mel_bins: int = 64,
         noise_scale: float = 0.0,
         dtype: torch.dtype | None = None,
@@ -606,7 +606,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
                 latents = self._pack_audio_latents(latents)
             if latents.ndim != 3:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]." # noqa
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is [batch_size, num_seq, num_features]."  # noqa
                 )
             latents = self._normalize_audio_latents(latents, self.audio_vae.latents_mean, self.audio_vae.latents_std)
             latents = self._create_noised_state(latents, noise_scale, generator)
@@ -972,7 +972,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
         if latents is not None:
             if latents.ndim == 5:
                 logger.info(
-                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred." # noqa
+                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred."  # noqa
                 )
                 _, _, latent_num_frames, latent_height, latent_width = latents.shape  # [B, C, F, H, W]
             elif latents.ndim == 3:
@@ -982,7 +982,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
                 )
             else:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]." # noqa
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]."  # noqa
                 )
         video_sequence_length = latent_num_frames * latent_height * latent_width
 
@@ -1008,7 +1008,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
         if audio_latents is not None:
             if audio_latents.ndim == 4:
                 logger.info(
-                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred." # noqa
+                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred."  # noqa
                 )
                 _, _, audio_num_frames, _ = audio_latents.shape  # [B, C, L, M]
             elif audio_latents.ndim == 3:
@@ -1018,7 +1018,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
                 )
             else:
                 raise ValueError(
-                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]." # noqa
+                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]."  # noqa
                 )
 
         num_mel_bins = self.audio_vae.config.mel_bins if getattr(self, "audio_vae", None) is not None else 64
@@ -1031,7 +1031,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
         # padding audio_latents if needed
         sp_size = getattr(self.od_config.parallel_config, "sequence_parallel_size", 1)
         if sp_size > 1:
-            pad_len = (sp_size - (audio_num_frames% sp_size)) % sp_size
+            pad_len = (sp_size - (audio_num_frames % sp_size)) % sp_size
             if pad_len > 0:
                 if audio_latents is not None:
                     pad_shape = list(latents.shape)
@@ -1272,7 +1272,7 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin):
 
 
 class LTX2TwoStagesPipeline(nn.Module):
-    """ LTX2TwoStagesPipeline is for two stages image to video generation """
+    """LTX2TwoStagesPipeline is for two stages image to video generation"""
 
     def __init__(
         self,
@@ -1294,7 +1294,10 @@ class LTX2TwoStagesPipeline(nn.Module):
             raise NotImplementedError(f"{self.model_path} is not supported for {self.__class__.__name__}.")
 
         self.pipe = LTX2Pipeline(od_config=od_config, prefix=prefix)
-        self.upsample_pipe = LTX2LatentUpsamplePipeline(vae=self.pipe.vae, od_config=od_config,)
+        self.upsample_pipe = LTX2LatentUpsamplePipeline(
+            vae=self.pipe.vae,
+            od_config=od_config,
+        )
 
         self.lora_manager = DiffusionLoRAManager(
             pipeline=self.pipe,
@@ -1383,7 +1386,7 @@ class LTX2TwoStagesPipeline(nn.Module):
             lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
             lora_request = LoRARequest(
                 lora_name="stage_2_distilled",
-                lora_int_id = 1,
+                lora_int_id=1,
                 lora_path=lora_path,
             )
             self.lora_manager.set_active_adapter(lora_request, lora_scale=1.0)

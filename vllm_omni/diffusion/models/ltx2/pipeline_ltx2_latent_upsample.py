@@ -15,6 +15,7 @@ from vllm_omni.diffusion.distributed.utils import get_local_device
 
 logger = logging.getLogger(__name__)
 
+
 class LTX2LatentUpsamplePipeline(nn.Module):
     def __init__(
         self,
@@ -192,12 +193,10 @@ class LTX2LatentUpsamplePipeline(nn.Module):
         if video is not None:
             num_frames = len(video)
             if num_frames % self.vae_temporal_compression_ratio != 1:
-                num_frames = (
-                    num_frames // self.vae_temporal_compression_ratio * self.vae_temporal_compression_ratio + 1
-                )
+                num_frames = num_frames // self.vae_temporal_compression_ratio * self.vae_temporal_compression_ratio + 1
                 video = video[:num_frames]
                 logger.warning(
-                    f"Video length expected to be of the form `k * {self.vae_temporal_compression_ratio} + 1` but is {len(video)}. Truncating to {num_frames} frames." # noqa
+                    f"Video length expected to be of the form `k * {self.vae_temporal_compression_ratio} + 1` but is {len(video)}. Truncating to {num_frames} frames."  # noqa
                 )
             video = self.video_processor.preprocess_video(video, height=height, width=width)
             video = video.to(device=device, dtype=torch.float32)

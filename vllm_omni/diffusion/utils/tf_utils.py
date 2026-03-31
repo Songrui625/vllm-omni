@@ -53,6 +53,7 @@ def get_transformer_config_kwargs(
 
     return filtered_params
 
+
 def find_module_with_attr(model, attr_name="transformer"):
     """
     This function searches for a module in the model that has the specified attribute.
@@ -67,6 +68,7 @@ def find_module_with_attr(model, attr_name="transformer"):
             return child
 
     return None
+
 
 def get_transformer_from_pipeline(pipeline: Any):
     pipe = find_module_with_attr(pipeline, attr_name="transformer")

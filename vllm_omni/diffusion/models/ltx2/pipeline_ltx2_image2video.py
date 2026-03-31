@@ -462,7 +462,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
         if latents is not None:
             if latents.ndim == 5:
                 logger.info(
-                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred." # noqa
+                    "Got latents of shape [batch_size, latent_dim, latent_frames, latent_height, latent_width], `latent_num_frames`, `latent_height`, `latent_width` will be inferred."  # noqa
                 )
                 _, _, latent_num_frames, latent_height, latent_width = latents.shape  # [B, C, F, H, W]
             elif latents.ndim == 3:
@@ -472,7 +472,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 )
             else:
                 raise ValueError(
-                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]." # noqa
+                    f"Provided `latents` tensor has shape {latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, latent_dim, latent_frames, latent_height, latent_width]."  # noqa
                 )
         video_sequence_length = latent_num_frames * latent_height * latent_width
 
@@ -511,7 +511,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
         if audio_latents is not None:
             if audio_latents.ndim == 4:
                 logger.info(
-                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred." # noqa
+                    "Got audio_latents of shape [batch_size, num_channels, audio_length, mel_bins], `audio_num_frames` will be inferred."  # noqa
                 )
                 _, _, audio_num_frames, _ = audio_latents.shape  # [B, C, L, M]
             elif audio_latents.ndim == 3:
@@ -521,7 +521,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
                 )
             else:
                 raise ValueError(
-                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]." # noqa
+                    f"Provided `audio_latents` tensor has shape {audio_latents.shape}, but the expected shape is either [batch_size, seq_len, num_features] or [batch_size, num_channels, audio_length, mel_bins]."  # noqa
                 )
 
         num_mel_bins = self.audio_vae.config.mel_bins if getattr(self, "audio_vae", None) is not None else 64
@@ -533,7 +533,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
         # padding audio_latents if needed
         sp_size = getattr(self.od_config.parallel_config, "sequence_parallel_size", 1)
         if sp_size > 1:
-            pad_len = (sp_size - (audio_num_frames% sp_size)) % sp_size
+            pad_len = (sp_size - (audio_num_frames % sp_size)) % sp_size
             if pad_len > 0:
                 if audio_latents is not None:
                     pad_shape = list(latents.shape)
@@ -789,8 +789,9 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
 
         return DiffusionOutput(output=(video, audio))
 
+
 class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
-    """ LTXImageToVideoTwoStagesPipeline is for two stages image to video generation """
+    """LTXImageToVideoTwoStagesPipeline is for two stages image to video generation"""
 
     support_image_input = True
 
@@ -814,7 +815,10 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
             raise NotImplementedError(f"{self.model_path} is not supported for {self.__class__.__name__}.")
 
         self.pipe = LTX2ImageToVideoPipeline(od_config=od_config, prefix=prefix)
-        self.upsample_pipe = LTX2LatentUpsamplePipeline(vae=self.pipe.vae, od_config=od_config,)
+        self.upsample_pipe = LTX2LatentUpsamplePipeline(
+            vae=self.pipe.vae,
+            od_config=od_config,
+        )
 
         self.lora_manager = DiffusionLoRAManager(
             pipeline=self.pipe,
@@ -907,7 +911,7 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
             lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
             lora_request = LoRARequest(
                 lora_name="stage_2_distilled",
-                lora_int_id = 1,
+                lora_int_id=1,
                 lora_path=lora_path,
             )
             self.lora_manager.set_active_adapter(lora_request, lora_scale=1.0)
