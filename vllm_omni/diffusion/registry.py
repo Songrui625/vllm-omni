@@ -12,6 +12,7 @@ from vllm_omni.diffusion.distributed.autoencoders.distributed_vae_executor impor
 from vllm_omni.diffusion.distributed.sp_plan import SequenceParallelConfig, get_sp_plan_from_model
 from vllm_omni.diffusion.forward_context import get_forward_context
 from vllm_omni.diffusion.hooks.sequence_parallel import apply_sequence_parallel
+from vllm_omni.diffusion.utils.tf_utils import find_module_with_attr
 
 logger = init_logger(__name__)
 
@@ -276,7 +277,12 @@ def _apply_sequence_parallel_if_enabled(model, od_config: OmniDiffusionConfig) -
 
         for attr in transformer_attrs:
             if not hasattr(model, attr):
-                continue
+                # Some pipeline like LTX2TwoStagesPipeline have recursive
+                # modules that have the transformer
+                module = find_module_with_attr(model, attr)
+                if module is None:
+                    continue
+                model = module
 
             transformer = getattr(model, attr)
             if transformer is None:
