@@ -36,12 +36,13 @@ class LTX2LatentUpsamplePipeline(nn.Module):
             # Use cpu context to create latent upsampler. The code k[:, None] @ k[None, :] in
             # diffuser's BlurDownsample is not supported on GPU as k is type of torch.Int64
             with torch.device("cpu"):
-                self.latent_upsampler = LTX2LatentUpsamplerModel.from_pretrained(
+                latent_upsampler = LTX2LatentUpsamplerModel.from_pretrained(
                     model,
                     subfolder="latent_upsampler",
                     torch_dtype=torch.bfloat16,
                     local_files_only=local_files_only,
                 ).to(self.device)
+        self.latent_upsampler = latent_upsampler
 
         self.vae_spatial_compression_ratio = (
             self.vae.spatial_compression_ratio if getattr(self, "vae", None) is not None else 32
