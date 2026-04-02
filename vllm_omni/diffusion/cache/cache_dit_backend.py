@@ -1215,6 +1215,8 @@ CUSTOM_DIT_ENABLERS.update(
         "StableDiffusion3Pipeline": enable_cache_for_sd3,
         "LTX2Pipeline": enable_cache_for_ltx2,
         "LTX2ImageToVideoPipeline": enable_cache_for_ltx2,
+        "LTX2TwoStagesPipeline": enable_cache_for_ltx2,
+        "LTX2ImageToVideoTwoStagesPipeline": enable_cache_for_ltx2,
         "BagelPipeline": enable_cache_for_bagel,
         "GlmImagePipeline": enable_cache_for_glm_image,
         "Flux2Pipeline": enable_cache_for_flux2,
