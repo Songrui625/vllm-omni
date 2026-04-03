@@ -536,7 +536,7 @@ class LTX2ImageToVideoPipeline(LTX2Pipeline):
             pad_len = (sp_size - (audio_num_frames % sp_size)) % sp_size
             if pad_len > 0:
                 if audio_latents is not None:
-                    pad_shape = list(latents.shape)
+                    pad_shape = list(audio_latents.shape)
                     pad_shape[2] = pad_len
                     padding = torch.zeros(pad_shape, dtype=audio_latents.dtype, device=audio_latents.device)
                     audio_latents = torch.cat([audio_latents, padding], dim=2)
