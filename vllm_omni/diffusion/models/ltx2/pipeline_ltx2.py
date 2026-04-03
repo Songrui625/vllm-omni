@@ -1399,10 +1399,14 @@ class LTX2TwoStagesPipeline(nn.Module):
             )
             self.pipe.scheduler = new_scheduler
 
-        req.sampling_params.num_inference_steps = 3
+        # We only want to change num_inference_steps here, so no need
+        # to deep copy the whole request
+        stage_2_req = copy.copy(req)
+        stage_2_req.sampling_params = req.sampling_params.clone()
+        stage_2_req.sampling_params.num_inference_steps = 3
 
         video, audio = self.pipe(
-            req=req,
+            req=stage_2_req,
             latents=upscaled_video_latent,
             audio_latents=audio_latent,
             prompt=prompt,
