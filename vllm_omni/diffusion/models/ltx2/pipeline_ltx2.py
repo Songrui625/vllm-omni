@@ -6,7 +6,6 @@ from __future__ import annotations
 import copy
 import inspect
 import json
-import logging
 import os
 from collections.abc import Iterable
 from contextlib import nullcontext
@@ -23,6 +22,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from torch import nn
 from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
+from vllm.logger import init_logger
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
@@ -42,7 +42,7 @@ from vllm_omni.lora.request import LoRARequest
 from .ltx2_transformer import LTX2VideoTransformer3DModel
 from .pipeline_ltx2_latent_upsample import LTX2LatentUpsamplePipeline
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def load_transformer_config(model_path: str, subfolder: str = "transformer", local_files_only: bool = True) -> dict:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import os
 from collections.abc import Iterable
 from typing import Any
@@ -19,6 +18,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import resca
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_latents
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
+from vllm.logger import init_logger
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
@@ -39,7 +39,7 @@ from .pipeline_ltx2 import (
 )
 from .pipeline_ltx2_latent_upsample import LTX2LatentUpsamplePipeline
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def get_ltx2_post_process_func(od_config: OmniDiffusionConfig):

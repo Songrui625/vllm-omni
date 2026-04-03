@@ -1,4 +1,3 @@
-import logging
 import os
 
 import torch
@@ -9,11 +8,12 @@ from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import retrieve_latents
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
+from vllm.logger import init_logger
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.utils import get_local_device
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 class LTX2LatentUpsamplePipeline(nn.Module):
@@ -25,7 +25,8 @@ class LTX2LatentUpsamplePipeline(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert vae is not None, "vae must be provided"
+        if vae is None:
+            raise ValueError("vae must be provided")
         self.vae = vae
 
         self.device = get_local_device()
