@@ -30,11 +30,11 @@ def get_converter_by_pipeline(pipeline):
     return lora_convert_mapping.get(pipeline.__class__.__name__, None)
 
 
-def _prepare_lora_deltas(
-    lora_sd,
+def _prepare_lora_delta(
+    lora_state_dict,
     base_key: str,
-    param_to_weight_names: dict[str, list[str]],
-    lora_matched_keys: set[str],
+    used_keys: set[str],
+    param_to_weight_names: dict[str, list[str]] | None = None,
     is_bias: bool = False,
     lora_a_suffix: str = "lora_A.weight",
     lora_b_suffix: str = "lora_B.weight",
@@ -49,6 +49,8 @@ def _prepare_lora_deltas(
     # example: {".to_qkv": [delta_q, delta_k, delta_v]}
     stacked_deltas = []
     is_stacked_param = False
+    if param_to_weight_names is None:
+        param_to_weight_names = defaultdict(list)
     for param_name, weight_names in param_to_weight_names.items():
         if param_name not in base_key:
             continue
@@ -57,23 +59,23 @@ def _prepare_lora_deltas(
         if is_bias:
             for weight_name in weight_names:
                 lora_bias_key = f"{base_key.replace(param_name, weight_name)}.{lora_bias_suffix}"
-                if lora_bias_key not in lora_sd:
+                if lora_bias_key not in lora_state_dict:
                     return None
-                delta = lora_sd[lora_bias_key]
+                delta = lora_state_dict[lora_bias_key]
                 stacked_deltas.append(delta)
-                lora_matched_keys.add(lora_bias_key)
+                used_keys.add(lora_bias_key)
         else:
             for weight_name in weight_names:
                 lora_a_key = f"{base_key.replace(param_name, weight_name)}.{lora_a_suffix}"
                 lora_b_key = lora_a_key.replace(lora_a_suffix, lora_b_suffix)
-                if lora_a_key not in lora_sd or lora_b_key not in lora_sd:
+                if lora_a_key not in lora_state_dict or lora_b_key not in lora_state_dict:
                     return None
-                a = lora_sd[lora_a_key]
-                b = lora_sd[lora_b_key]
+                a = lora_state_dict[lora_a_key]
+                b = lora_state_dict[lora_b_key]
                 delta = torch.matmul(b, a)
                 stacked_deltas.append(delta)
-                lora_matched_keys.add(lora_a_key)
-                lora_matched_keys.add(lora_b_key)
+                used_keys.add(lora_a_key)
+                used_keys.add(lora_b_key)
         continue
 
     if is_stacked_param:
@@ -81,19 +83,19 @@ def _prepare_lora_deltas(
 
     if is_bias:
         lora_bias_key = f"{base_key}.{lora_bias_suffix}"
-        if lora_bias_key not in lora_sd:
+        if lora_bias_key not in lora_state_dict:
             return None
-        lora_matched_keys.add(lora_bias_key)
-        return lora_sd[lora_bias_key]
+        used_keys.add(lora_bias_key)
+        return lora_state_dict[lora_bias_key]
 
     lora_a_key = f"{base_key}.{lora_a_suffix}"
     lora_b_key = f"{base_key}.{lora_b_suffix}"
-    if lora_a_key not in lora_sd or lora_b_key not in lora_sd:
+    if lora_a_key not in lora_state_dict or lora_b_key not in lora_state_dict:
         return None
-    a = lora_sd[lora_a_key]
-    b = lora_sd[lora_b_key]
-    lora_matched_keys.add(lora_a_key)
-    lora_matched_keys.add(lora_b_key)
+    a = lora_state_dict[lora_a_key]
+    b = lora_state_dict[lora_b_key]
+    used_keys.add(lora_a_key)
+    used_keys.add(lora_b_key)
     return torch.matmul(b, a)
 
 
@@ -209,11 +211,11 @@ class LoraLoaderMixin:
             else:
                 continue
 
-            delta = _prepare_lora_deltas(
+            delta = _prepare_lora_delta(
                 state_dict,
                 base_key,
-                param_to_weight_names,
                 lora_loaded_keys,
+                param_to_weight_names,
                 is_bias,
                 lora_a_suffix,
                 lora_b_suffix,
@@ -265,11 +267,11 @@ class LoraLoaderMixin:
             else:
                 continue
 
-            delta = _prepare_lora_deltas(
+            delta = _prepare_lora_delta(
                 state_dict,
                 base_key,
-                param_to_weight_names,
                 lora_unloaded_keys,
+                param_to_weight_names,
                 is_bias,
                 lora_a_suffix,
                 lora_b_suffix,
