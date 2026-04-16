@@ -38,7 +38,7 @@ def _prepare_lora_deltas(
     is_bias: bool = False,
     lora_a_suffix: str = "lora_A.weight",
     lora_b_suffix: str = "lora_B.weight",
-    lora_bias_suffix: str = ".bias",
+    lora_bias_suffix: str = "bias",
 ):
     # stacked_params_mapping                       param_to_weight_names
     # [(".to_qkv", ".to_q.", "q")
