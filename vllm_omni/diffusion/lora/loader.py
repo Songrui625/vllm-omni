@@ -33,13 +33,13 @@ def get_converter_by_pipeline(pipeline):
 def _prepare_lora_delta(
     lora_state_dict,
     base_key: str,
-    used_keys: set[str],
     param_to_weight_names: dict[str, list[str]] | None = None,
     is_bias: bool = False,
     lora_a_suffix: str = "lora_A.weight",
     lora_b_suffix: str = "lora_B.weight",
     lora_bias_suffix: str = "bias",
 ):
+    used_keys = set()
     # stacked_params_mapping                       param_to_weight_names
     # [(".to_qkv", ".to_q.", "q")
     # (".to_qkv", ".to_k.", "k")  ========> {".to_qkv": [".to_q", ".to_k", ".to_v"]}
@@ -69,7 +69,7 @@ def _prepare_lora_delta(
                 lora_a_key = f"{base_key.replace(param_name, weight_name)}.{lora_a_suffix}"
                 lora_b_key = lora_a_key.replace(lora_a_suffix, lora_b_suffix)
                 if lora_a_key not in lora_state_dict or lora_b_key not in lora_state_dict:
-                    return None
+                    return None, used_keys
                 a = lora_state_dict[lora_a_key]
                 b = lora_state_dict[lora_b_key]
                 delta = torch.matmul(b, a)
@@ -79,24 +79,24 @@ def _prepare_lora_delta(
         continue
 
     if is_stacked_param:
-        return torch.concat(stacked_deltas)
+        return torch.concat(stacked_deltas), used_keys
 
     if is_bias:
         lora_bias_key = f"{base_key}.{lora_bias_suffix}"
         if lora_bias_key not in lora_state_dict:
-            return None
+            return None, used_keys
         used_keys.add(lora_bias_key)
-        return lora_state_dict[lora_bias_key]
+        return lora_state_dict[lora_bias_key], used_keys
 
     lora_a_key = f"{base_key}.{lora_a_suffix}"
     lora_b_key = f"{base_key}.{lora_b_suffix}"
     if lora_a_key not in lora_state_dict or lora_b_key not in lora_state_dict:
-        return None
+        return None, used_keys
     a = lora_state_dict[lora_a_key]
     b = lora_state_dict[lora_b_key]
     used_keys.add(lora_a_key)
     used_keys.add(lora_b_key)
-    return torch.matmul(b, a)
+    return torch.matmul(b, a), used_keys
 
 
 def _load_lora_state_dict(
@@ -211,10 +211,9 @@ class LoraLoaderMixin:
             else:
                 continue
 
-            delta = _prepare_lora_delta(
+            delta, used_keys = _prepare_lora_delta(
                 state_dict,
                 base_key,
-                lora_loaded_keys,
                 param_to_weight_names,
                 is_bias,
                 lora_a_suffix,
@@ -223,22 +222,19 @@ class LoraLoaderMixin:
             )
             if delta is None:
                 continue
+            lora_loaded_keys.update(used_keys)
 
             delta = delta.to(device=params.device, dtype=params.dtype)
             with torch.no_grad():
                 params.add_(delta)
             del delta
 
-        num_loaded_keys = 0
-        for k in state_dict:
-            if k not in lora_loaded_keys:
-                logger.warning(f"Missing loading lora key: {k}")
-            else:
-                num_loaded_keys += 1
+        missing_keys = set(state_dict.keys()) - lora_loaded_keys
+        for k in missing_keys:
+            logger.warning(f"Missing loading lora key: {k}")
 
-        assert num_loaded_keys == len(lora_loaded_keys)
-
-        logger.info(f"{num_loaded_keys} lora keys loaded into {module.__class__.__name__}.")
+        logger.info(f"{len(lora_loaded_keys)} lora keys loaded into {module.__class__.__name__}.")
+        return lora_loaded_keys
 
     @classmethod
     def unload_module_lora(
@@ -267,10 +263,9 @@ class LoraLoaderMixin:
             else:
                 continue
 
-            delta = _prepare_lora_delta(
+            delta, used_keys = _prepare_lora_delta(
                 state_dict,
                 base_key,
-                lora_unloaded_keys,
                 param_to_weight_names,
                 is_bias,
                 lora_a_suffix,
@@ -279,19 +274,18 @@ class LoraLoaderMixin:
             )
             if delta is None:
                 continue
+            lora_unloaded_keys.update(used_keys)
 
             delta = delta.to(device=param.device, dtype=param.dtype)
             param.sub_(delta)
             del delta
 
-        num_unloaded_keys = 0
-        for k in lora_unloaded_keys:
-            if k not in state_dict:
-                logger.warning(f"Missing unloading lora key: {k}")
-            else:
-                num_unloaded_keys += 1
+        missing_keys = set(state_dict.keys()) - lora_unloaded_keys
+        for k in missing_keys:
+            logger.warning(f"Missing unloading lora key: {k}")
 
-        logger.info(f"Unload {num_unloaded_keys} lora keys from {module.__class__.__name__}.")
+        logger.info(f"{len(lora_unloaded_keys)} lora keys unloaded from {module.__class__.__name__}.")
+        return lora_unloaded_keys
 
 
 class QwenImageLoraLoaderMixin(LoraLoaderMixin):
