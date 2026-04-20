@@ -303,13 +303,16 @@ class LoraLoaderMixin:
 class QwenImageLoraLoaderMixin(LoraLoaderMixin):
     def load_lora_weights(
         self,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path_or_dict: str | dict[str, torch.Tensor],
         adapter_name: str | None = None,
     ):
         if adapter_name in self.lora_loaded:
             return
 
-        state_dict = _load_lora_state_dict(pretrained_model_name_or_path)
+        if isinstance(pretrained_model_name_or_path_or_dict, dict):
+            state_dict = pretrained_model_name_or_path_or_dict
+        else:
+            state_dict = _load_lora_state_dict(pretrained_model_name_or_path_or_dict)
 
         has_alpha = any(k.endswith(".alpha") for k in state_dict)
         is_non_diffusers_format = any(k.startswith("diffusion_model.") for k in state_dict)
@@ -347,13 +350,16 @@ class LTX2LoraLoaderMixin(LoraLoaderMixin):
 
     def load_lora_weights(
         self,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path_or_dict: str | dict[str, torch.Tensor],
         adapter_name: str | None = None,
     ):
         if adapter_name in self.lora_loaded:
             return
 
-        state_dict = _load_lora_state_dict(pretrained_model_name_or_path)
+        if isinstance(pretrained_model_name_or_path_or_dict, dict):
+            state_dict = pretrained_model_name_or_path_or_dict
+        else:
+            state_dict = _load_lora_state_dict(pretrained_model_name_or_path_or_dict)
 
         lora_state_dict = state_dict
         is_non_diffusers_format = any(k.startswith("diffusion_model.") for k in state_dict)
