@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import torch
 import torch.nn as nn
 from torch.testing import assert_close
@@ -8,8 +10,8 @@ from vllm_omni.diffusion.lora.loader import (
     _remap_state_dict_keys,
 )
 
-HEAD_DIM = 64
-RANK = 32
+HEAD_DIM = 24
+RANK = 2
 NUM_LAYERS = 10
 
 
@@ -18,39 +20,38 @@ class DummyTransformerBlock(nn.Module):
         self,
         d_model: int,
         bias: bool = False,
+        stacked_params: bool = False,
     ):
         super().__init__()
         self.attn = nn.Module()
-        self.attn.to_q = nn.Linear(d_model, d_model, bias=bias)
-        self.attn.to_k = nn.Linear(d_model, d_model, bias=bias)
-        self.attn.to_v = nn.Linear(d_model, d_model, bias=bias)
+        if stacked_params:
+            self.attn.to_qkv = nn.Linear(d_model * 3, d_model, bias=bias)
+        else:
+            self.attn.to_q = nn.Linear(d_model, d_model, bias=bias)
+            self.attn.to_k = nn.Linear(d_model, d_model, bias=bias)
+            self.attn.to_v = nn.Linear(d_model, d_model, bias=bias)
         self.attn.to_out = nn.Sequential(nn.Linear(d_model, d_model, bias=bias))
 
 
 class DummyTransformer(nn.Module):
-    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
+    def __init__(self, num_layers: int, d_model: int, bias: bool = False, stacked_params: bool = False):
         super().__init__()
 
-        self.blocks = nn.ModuleList([DummyTransformerBlock(d_model, bias=bias) for _ in range(num_layers)])
-
-
-class DummyTransformerWithStackedParams(DummyTransformer):
-    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
-        super().__init__(num_layers, d_model, bias=bias)
-        self.stacked_params_mapping = [
-            (".attn.to_qkv", ".attn.to_q", "q"),
-            (".attn.to_qkv", ".attn.to_k", "k"),
-            (".attn.to_qkv", ".attn.to_v", "v"),
-        ]
+        self.blocks = nn.ModuleList(
+            [DummyTransformerBlock(d_model, bias=bias, stacked_params=stacked_params) for _ in range(num_layers)]
+        )
+        if stacked_params:
+            self.stacked_params_mapping = [
+                (".attn.to_qkv", ".attn.to_q", "q"),
+                (".attn.to_qkv", ".attn.to_k", "k"),
+                (".attn.to_qkv", ".attn.to_v", "v"),
+            ]
 
 
 class DummyPipeline(nn.Module, LoraLoaderMixin):
     def __init__(self, num_layers: int, d_model: int, bias: bool = False, stacked_params: bool = False):
         super().__init__()
-        if stacked_params:
-            self.transformer = DummyTransformerWithStackedParams(num_layers, d_model, bias=bias)
-        else:
-            self.transformer = DummyTransformer(num_layers, d_model, bias=bias)
+        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=stacked_params)
 
 
 # ======================================================
@@ -107,11 +108,34 @@ def make_lora_state_dict_for_module(
     lora_a_suffix: str = "lora_A.weight",
     lora_b_suffix: str = "lora_B.weight",
     lora_bias_suffix: str = "bias",
+    prefix: str = "transformer",
 ):
+    param_to_weight_names = defaultdict(list)
+    if hasattr(module, "stacked_params_mapping"):
+        for param_name, weight_name, _ in module.stacked_params_mapping:
+            param_to_weight_names[param_name].append(weight_name)
+
     state_dict = {}
-    for name, param in module.named_parameters():
+    for name, param in module.named_parameters(prefix=prefix):
         if name.endswith(".weight"):
             base_key = name[: -len(".weight")]
+            d_in, d_out = param.shape
+            is_stacked_param = False
+            for param_name, weight_names in param_to_weight_names.items():
+                if param_name not in name:
+                    continue
+                is_stacked_param = True
+                target_in = d_in // len(weight_names)
+                for weight_name in weight_names:
+                    lora_key = base_key.replace(param_name, weight_name)
+                    weight_a = torch.randn(lora_rank, d_out)
+                    weight_b = torch.randn(target_in, lora_rank)
+                    state_dict[f"{lora_key}.{lora_a_suffix}"] = weight_a
+                    state_dict[f"{lora_key}.{lora_b_suffix}"] = weight_b
+
+            if is_stacked_param:
+                continue
+
             d_in, d_out = param.shape
             weight_a = torch.randn(lora_rank, d_out)
             weight_b = torch.randn(d_in, lora_rank)
@@ -121,8 +145,19 @@ def make_lora_state_dict_for_module(
             state_dict[key_b] = weight_b
         elif name.endswith(".bias") and bias:
             base_key = name[: -len(".bias")]
-            key_bias = f"{base_key}.{lora_bias_suffix}"
-            state_dict[key_bias] = torch.randn_like(param)
+            if param_to_weight_names:
+                d_bias = param.shape[0]
+                for param_name, weight_names in param_to_weight_names.items():
+                    if param_name not in name:
+                        continue
+                    target_bias = d_bias // len(weight_names)
+                    for weight_name in weight_names:
+                        lora_key = base_key.replace(param_name, weight_name)
+                        weight_bias = torch.randn(target_bias)
+                        state_dict[f"{lora_key}.{lora_bias_suffix}"] = weight_bias
+            else:
+                key_bias = f"{base_key}.{lora_bias_suffix}"
+                state_dict[key_bias] = torch.randn_like(param)
 
     return state_dict
 
@@ -275,7 +310,7 @@ class TestLoraLoaderMixin:
         pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM)
         original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
 
-        lora_state_dict = make_lora_state_dict_for_module(pipeline)
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
@@ -294,7 +329,7 @@ class TestLoraLoaderMixin:
         pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM, bias=True)
         original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
 
-        lora_state_dict = make_lora_state_dict_for_module(pipeline, bias=True)
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer, bias=True)
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
@@ -313,7 +348,7 @@ class TestLoraLoaderMixin:
         pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM, stacked_params=True)
         original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
 
-        lora_state_dict = make_lora_state_dict_for_module(pipeline)
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
@@ -332,7 +367,7 @@ class TestLoraLoaderMixin:
         pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM, bias=True, stacked_params=True)
         original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
 
-        lora_state_dict = make_lora_state_dict_for_module(pipeline, bias=True)
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer, bias=True)
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
