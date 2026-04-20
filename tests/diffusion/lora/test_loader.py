@@ -397,6 +397,38 @@ class TestLoraLoaderMixin:
         missing_keys = set([key for key in lora_state_dict.keys() if key.endswith(".bias")]) - used_keys
         assert len(missing_keys) == 0
 
+    def test_unload_module_lora(self):
+        pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM)
+        original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+        # validate the state dict is valid
+        assert len(lora_state_dict) > 0
+
+        # remap the keys to vllm-omni format
+        lora_state_dict = _remap_state_dict_keys(lora_state_dict, [(".to_out.0.", ".to_out.")])
+
+        used_keys = pipeline.load_lora_into_module(lora_state_dict, pipeline.transformer)
+
+        # validate the weights are updated
+        for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert not torch.allclose(param, original_weights[name])
+
+        # validate all keys are used
+        missing_keys = set(lora_state_dict.keys()) - used_keys
+        assert len(missing_keys) == 0
+
+        unload_used_keys = pipeline.unload_module_lora(lora_state_dict, pipeline.transformer)
+        missing_keys = set(lora_state_dict.keys()) - unload_used_keys
+        assert len(missing_keys) == 0
+        assert len(unload_used_keys - used_keys) == 0
+
+        # validate the weights are restored
+        for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert_close(param, original_weights[name])
+
 
 # ======================================================
 # Test QwenImageLoraLoaderMixin
@@ -447,7 +479,7 @@ class TestQwenImageLoraLoaderMixin:
         # validate the weights are restored after lora unloaded
         for name, param in pipeline.transformer.named_parameters():
             if name.endswith(".weight"):
-                assert torch.allclose(param, original_weights[name])
+                assert_close(param, original_weights[name])
 
         # validate lora_loaded map is updated
         assert "adapter0" not in pipeline.lora_loaded
