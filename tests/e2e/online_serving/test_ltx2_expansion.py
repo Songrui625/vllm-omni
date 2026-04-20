@@ -54,7 +54,7 @@ def _get_ltx2_feature_cases():
                 OmniServerParams(
                     model=model_path,
                     model_class_name=model_cls_name,
-                    server_args=["--cache-backend", "cache_dit"],
+                    server_args=["--cache-backend", "cache_dit", "--enable-layerwise-offload"],
                 ),
                 id=f"{model_cls_name}_cache_dit",
                 marks=SINGLE_CARD_FEATURE_MARKS,
