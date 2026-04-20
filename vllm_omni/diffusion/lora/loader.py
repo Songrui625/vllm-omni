@@ -60,7 +60,7 @@ def _prepare_lora_delta(
             for weight_name in weight_names:
                 lora_bias_key = f"{base_key.replace(param_name, weight_name)}.{lora_bias_suffix}"
                 if lora_bias_key not in lora_state_dict:
-                    return None
+                    return None, used_keys
                 delta = lora_state_dict[lora_bias_key]
                 stacked_deltas.append(delta)
                 used_keys.add(lora_bias_key)
@@ -289,7 +289,8 @@ class LoraLoaderMixin:
             lora_unloaded_keys.update(used_keys)
 
             delta = delta.to(device=param.device, dtype=param.dtype)
-            param.sub_(delta)
+            with torch.no_grad():
+                param.sub_(delta)
             del delta
 
         missing_keys = set(state_dict.keys()) - lora_unloaded_keys
