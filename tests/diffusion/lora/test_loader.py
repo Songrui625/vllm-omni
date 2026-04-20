@@ -6,6 +6,7 @@ from torch.testing import assert_close
 
 from vllm_omni.diffusion.lora.loader import (
     LoraLoaderMixin,
+    QwenImageLoraLoaderMixin,
     _prepare_lora_delta,
     _remap_state_dict_keys,
 )
@@ -30,7 +31,7 @@ class DummyTransformerBlock(nn.Module):
             self.attn.to_q = nn.Linear(d_model, d_model, bias=bias)
             self.attn.to_k = nn.Linear(d_model, d_model, bias=bias)
             self.attn.to_v = nn.Linear(d_model, d_model, bias=bias)
-        self.attn.to_out = nn.Sequential(nn.Linear(d_model, d_model, bias=bias))
+        self.attn.to_out = nn.Linear(d_model, d_model, bias=bias)
 
 
 class DummyTransformer(nn.Module):
@@ -119,6 +120,8 @@ def make_lora_state_dict_for_module(
     for name, param in module.named_parameters(prefix=prefix):
         if name.endswith(".weight"):
             base_key = name[: -len(".weight")]
+            if base_key.endswith(".to_out"):
+                base_key = base_key.replace(".to_out", ".to_out.0")
             d_in, d_out = param.shape
             is_stacked_param = False
             for param_name, weight_names in param_to_weight_names.items():
@@ -314,6 +317,9 @@ class TestLoraLoaderMixin:
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
+        # remap the keys to vllm-omni format
+        lora_state_dict = _remap_state_dict_keys(lora_state_dict, [(".to_out.0.", ".to_out.")])
+
         used_keys = pipeline.load_lora_into_module(lora_state_dict, pipeline.transformer)
 
         # validate the weights are updated
@@ -332,6 +338,9 @@ class TestLoraLoaderMixin:
         lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer, bias=True)
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
+
+        # remap the keys to vllm-omni format
+        lora_state_dict = _remap_state_dict_keys(lora_state_dict, [(".to_out.0.", ".to_out.")])
 
         used_keys = pipeline.load_lora_into_module(lora_state_dict, pipeline.transformer)
 
@@ -352,6 +361,9 @@ class TestLoraLoaderMixin:
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
+        # remap the keys to vllm-omni format
+        lora_state_dict = _remap_state_dict_keys(lora_state_dict, [(".to_out.0.", ".to_out.")])
+
         used_keys = pipeline.load_lora_into_module(lora_state_dict, pipeline.transformer)
 
         # validate the weights are updated
@@ -371,6 +383,9 @@ class TestLoraLoaderMixin:
         # validate the state dict is valid
         assert len(lora_state_dict) > 0
 
+        # remap the keys to vllm-omni format
+        lora_state_dict = _remap_state_dict_keys(lora_state_dict, [(".to_out.0.", ".to_out.")])
+
         used_keys = pipeline.load_lora_into_module(lora_state_dict, pipeline.transformer)
 
         # validate the weights are updated
@@ -381,3 +396,58 @@ class TestLoraLoaderMixin:
         # validate all keys are used
         missing_keys = set([key for key in lora_state_dict.keys() if key.endswith(".bias")]) - used_keys
         assert len(missing_keys) == 0
+
+
+# ======================================================
+# Test QwenImageLoraLoaderMixin
+# ======================================================
+class DummyQwenImagePipeline(nn.Module, QwenImageLoraLoaderMixin):
+    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
+        super().__init__()
+        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=True)
+
+
+class TestQwenImageLoraLoaderMixin:
+    def test_load_lora_weights(self):
+        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
+        original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+        # validate the state dict is valid
+        assert len(lora_state_dict) > 0
+
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+
+        # validate the weights are updated after lora loaded
+        for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert not torch.allclose(param, original_weights[name])
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+    def test_unload_lora_weights(self):
+        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
+        original_weights = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+        # validate the state dict is valid
+        assert len(lora_state_dict) > 0
+
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+        # validate the weights are updated after lora loaded
+        for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert not torch.allclose(param, original_weights[name])
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+        pipeline.unload_lora_weights("adapter0")
+        # validate the weights are restored after lora unloaded
+        for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert torch.allclose(param, original_weights[name])
+
+        # validate lora_loaded map is updated
+        assert "adapter0" not in pipeline.lora_loaded
