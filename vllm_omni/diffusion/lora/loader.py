@@ -179,6 +179,18 @@ def _remap_state_dict_keys(sd, rules):
 class LoraLoaderMixin:
     transformer_name = "transformer"
 
+    # Lazy initialization to avoid MRO issues: __init__ may not be called
+    # when mixin with nn.Module
+    @property
+    def lora_loaded(self):
+        if not hasattr(self, "_lora_loaded"):
+            self._lora_loaded = {}
+        return self._lora_loaded
+
+    @lora_loaded.setter
+    def lora_loaded(self, value):
+        self._lora_loaded = value
+
     @classmethod
     def load_lora_into_module(
         cls,
@@ -289,8 +301,6 @@ class LoraLoaderMixin:
 
 
 class QwenImageLoraLoaderMixin(LoraLoaderMixin):
-    lora_loaded = dict()
-
     def load_lora_weights(
         self,
         pretrained_model_name_or_path: str,
@@ -334,7 +344,6 @@ class QwenImageLoraLoaderMixin(LoraLoaderMixin):
 
 class LTX2LoraLoaderMixin(LoraLoaderMixin):
     connectors_name = "connectors"
-    lora_loaded = dict()
 
     def load_lora_weights(
         self,
@@ -398,7 +407,6 @@ class LTX2LoraLoaderMixin(LoraLoaderMixin):
 
 
 class WanLoraLoaderMixin(LoraLoaderMixin):
-    lora_loaded = dict()
     supported_ckpt_mapping = {
         "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors": "transformer",
         "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors": "transformer_2",
