@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from torch import nn
 from vllm.logger import init_logger
 
+from vllm_omni.diffusion.utils.tf_utils import find_module_with_attr
+
 logger = init_logger(__name__)
 
 
@@ -40,7 +42,13 @@ class ModuleDiscovery:
         dit_names: list[str] = []
         for attr in ModuleDiscovery.DIT_ATTRS:
             if not hasattr(pipeline, attr):
-                continue
+                # Some pipeline like LTX2TwoStagesPipeline have recursive
+                # modules that have the transformer
+                module = find_module_with_attr(pipeline, attr)
+                if module is None:
+                    continue
+                pipeline = module
+
             module_obj = getattr(pipeline, attr)
             if module_obj is None:
                 continue
