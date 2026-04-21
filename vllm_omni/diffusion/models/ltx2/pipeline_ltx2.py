@@ -1262,45 +1262,46 @@ class LTX2TwoStagesPipeline(nn.Module):
 
         original_scheduler = self.pipe.scheduler
         lora_loaded = False
-        if not self.distilled:
-            # Load Stage 2 distilled LoRA
-            lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
-            self.pipe.load_lora_weights(lora_path, adapter_name="stage_2_distilled")
-            lora_loaded = True
+        try:
+            if not self.distilled:
+                # Load Stage 2 distilled LoRA
+                lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
+                self.pipe.load_lora_weights(lora_path, adapter_name="stage_2_distilled")
+                lora_loaded = True
 
-            # Change scheduler to use Stage 2 distilled sigmas as is
-            original_scheduler = self.pipe.scheduler
-            new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-                self.pipe.scheduler.config,
-                use_dynamic_shifting=False,
-                shift_terminal=None,
-            )
-            self.pipe.scheduler = new_scheduler
+                # Change scheduler to use Stage 2 distilled sigmas as is
+                original_scheduler = self.pipe.scheduler
+                new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
+                    self.pipe.scheduler.config,
+                    use_dynamic_shifting=False,
+                    shift_terminal=None,
+                )
+                self.pipe.scheduler = new_scheduler
 
-        # We only want to change num_inference_steps here, so no need
-        # to deep copy the whole request
-        stage_2_req = copy.copy(req)
-        stage_2_req.sampling_params = req.sampling_params.clone()
-        stage_2_req.sampling_params.num_inference_steps = 3
-        stage_2_req.guidance_scale = 1.0
+            # We only want to change num_inference_steps here, so no need
+            # to deep copy the whole request
+            stage_2_req = copy.copy(req)
+            stage_2_req.sampling_params = req.sampling_params.clone()
+            stage_2_req.sampling_params.num_inference_steps = 3
+            stage_2_req.guidance_scale = 1.0
 
-        video, audio = self.pipe(
-            req=stage_2_req,
-            latents=upscaled_video_latent,
-            audio_latents=audio_latent,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
-            sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
-            generator=generator,
-            output_type="np",
-            return_dict=False,
-        ).output
-
-        if lora_loaded:
-            self.pipe.unload_lora_weights("stage_2_distilled")
-        if original_scheduler is not None:
-            self.pipe.scheduler = original_scheduler
+            video, audio = self.pipe(
+                req=stage_2_req,
+                latents=upscaled_video_latent,
+                audio_latents=audio_latent,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
+                sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
+                generator=generator,
+                output_type="np",
+                return_dict=False,
+            ).output
+        finally:
+            if lora_loaded:
+                self.pipe.unload_lora_weights("stage_2_distilled")
+            if original_scheduler is not None:
+                self.pipe.scheduler = original_scheduler
 
         return DiffusionOutput(output=(video, audio))
 

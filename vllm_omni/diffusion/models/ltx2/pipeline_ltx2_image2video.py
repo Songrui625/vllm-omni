@@ -27,7 +27,6 @@ from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.dmd2 import DMD2PipelineMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
-from vllm_omni.lora.request import LoRARequest
 
 from .pipeline_ltx2 import (
     LTX2Pipeline,
@@ -754,8 +753,6 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
         # will not return the expected directory name, so we need to remove it by normpath
         if "distilled" in os.path.basename(os.path.normpath(self.model_path)):
             self.distilled = True
-        else:
-            raise NotImplementedError(f"{self.model_path} is not supported for {self.__class__.__name__}.")
 
         self.pipe = LTX2ImageToVideoPipeline(od_config=od_config, prefix=prefix)
         self.upsample_pipe = LTX2LatentUpsamplePipeline(
@@ -849,41 +846,47 @@ class LTX2ImageToVideoTwoStagesPipeline(nn.Module):
             return_dict=False,
         )[0]
 
-        if not self.distilled:
-            # Load Stage 2 distilled LoRA
-            lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
-            lora_request = LoRARequest(
-                lora_name="stage_2_distilled",
-                lora_int_id=1,
-                lora_path=lora_path,
-            )
-            self.lora_manager.set_active_adapter(lora_request, lora_scale=1.0)
+        original_scheduler = self.pipe.scheduler
+        lora_loaded = False
+        try:
+            if not self.distilled:
+                # Load Stage 2 distilled LoRA
+                lora_path = f"{self.model_path}/ltx-2-19b-distilled-lora-384.safetensors"
+                self.pipe.load_lora_weights(lora_path, adapter_name="stage_2_distilled")
+                lora_loaded = True
 
-            # Change scheduler to use Stage 2 distilled sigmas as is
-            new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-                self.pipe.scheduler.config,
-                use_dynamic_shifting=False,
-                shift_terminal=None,
-            )
-            self.pipe.scheduler = new_scheduler
+                # Change scheduler to use Stage 2 distilled sigmas as is
+                original_scheduler = self.pipe.scheduler
+                new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
+                    self.pipe.scheduler.config,
+                    use_dynamic_shifting=False,
+                    shift_terminal=None,
+                )
+                self.pipe.scheduler = new_scheduler
 
-        stage_2_req = copy.copy(req)
-        stage_2_req.sampling_params = req.sampling_params.clone()
-        stage_2_req.sampling_params.num_inference_steps = 3
+            stage_2_req = copy.copy(req)
+            stage_2_req.sampling_params = req.sampling_params.clone()
+            stage_2_req.sampling_params.num_inference_steps = 3
+            stage_2_req.sampling_params.guidance_scale = 1.0
 
-        video, audio = self.pipe(
-            req=stage_2_req,
-            latents=upscaled_video_latent,
-            audio_latents=audio_latent,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
-            sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
-            guidance_scale=1.0,
-            generator=generator,
-            output_type="np",
-            return_dict=False,
-        ).output
+            video, audio = self.pipe(
+                req=stage_2_req,
+                latents=upscaled_video_latent,
+                audio_latents=audio_latent,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
+                sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
+                guidance_scale=1.0,
+                generator=generator,
+                output_type="np",
+                return_dict=False,
+            ).output
+        finally:
+            if lora_loaded:
+                self.pipe.unload_lora_weights("stage_2_distilled")
+            if original_scheduler is not None:
+                self.pipe.scheduler = original_scheduler
 
         return DiffusionOutput(output=(video, audio))
 
