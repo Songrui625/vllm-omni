@@ -129,6 +129,7 @@ def make_lora_state_dict_for_module(
             base_key = name[: -len(".weight")]
             if remap_proj_out and base_key.endswith(".to_out"):
                 base_key = base_key.replace(".to_out", ".to_out.0")
+
             d_in, d_out = param.shape
             is_stacked_param = False
             for param_name, weight_names in param_to_weight_names.items():
@@ -146,7 +147,6 @@ def make_lora_state_dict_for_module(
             if is_stacked_param:
                 continue
 
-            d_in, d_out = param.shape
             weight_a = torch.randn(lora_rank, d_out)
             weight_b = torch.randn(d_in, lora_rank)
             key_a = f"{base_key}.{lora_a_suffix}"
@@ -155,19 +155,26 @@ def make_lora_state_dict_for_module(
             state_dict[key_b] = weight_b
         elif name.endswith(".bias") and bias:
             base_key = name[: -len(".bias")]
-            if param_to_weight_names:
-                d_bias = param.shape[0]
-                for param_name, weight_names in param_to_weight_names.items():
-                    if param_name not in name:
-                        continue
-                    target_bias = d_bias // len(weight_names)
-                    for weight_name in weight_names:
-                        lora_key = base_key.replace(param_name, weight_name)
-                        weight_bias = torch.randn(target_bias)
-                        state_dict[f"{lora_key}.{lora_bias_suffix}"] = weight_bias
-            else:
-                key_bias = f"{base_key}.{lora_bias_suffix}"
-                state_dict[key_bias] = torch.randn_like(param)
+            if remap_proj_out and base_key.endswith(".to_out"):
+                base_key = base_key.replace(".to_out", ".to_out.0")
+
+            d_bias = param.shape[0]
+            is_stacked_param = False
+            for param_name, weight_names in param_to_weight_names.items():
+                if param_name not in name:
+                    continue
+                is_stacked_param = True
+                target_bias = d_bias // len(weight_names)
+                for weight_name in weight_names:
+                    lora_key = base_key.replace(param_name, weight_name)
+                    weight_bias = torch.randn(target_bias)
+                    state_dict[f"{lora_key}.{lora_bias_suffix}"] = weight_bias
+
+            if is_stacked_param:
+                continue
+
+            key_bias = f"{base_key}.{lora_bias_suffix}"
+            state_dict[key_bias] = torch.randn_like(param)
 
     return state_dict
 
