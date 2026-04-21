@@ -2,10 +2,15 @@ from collections import defaultdict
 
 import torch
 import torch.nn as nn
+from diffusers.loaders.lora_conversion_utils import (
+    _convert_non_diffusers_ltx2_lora_to_diffusers,
+)
+from pytest_mock import MockerFixture
 from torch.testing import assert_close
 
 from vllm_omni.diffusion.lora.loader import (
     LoraLoaderMixin,
+    LTX2LoraLoaderMixin,
     QwenImageLoraLoaderMixin,
     _prepare_lora_delta,
     _remap_state_dict_keys,
@@ -110,6 +115,7 @@ def make_lora_state_dict_for_module(
     lora_b_suffix: str = "lora_B.weight",
     lora_bias_suffix: str = "bias",
     prefix: str = "transformer",
+    remap_proj_out: bool = True,
 ):
     param_to_weight_names = defaultdict(list)
     if hasattr(module, "stacked_params_mapping"):
@@ -120,7 +126,7 @@ def make_lora_state_dict_for_module(
     for name, param in module.named_parameters(prefix=prefix):
         if name.endswith(".weight"):
             base_key = name[: -len(".weight")]
-            if base_key.endswith(".to_out"):
+            if remap_proj_out and base_key.endswith(".to_out"):
                 base_key = base_key.replace(".to_out", ".to_out.0")
             d_in, d_out = param.shape
             is_stacked_param = False
@@ -478,6 +484,87 @@ class TestQwenImageLoraLoaderMixin:
         pipeline.unload_lora_weights("adapter0")
         # validate the weights are restored after lora unloaded
         for name, param in pipeline.transformer.named_parameters():
+            if name.endswith(".weight"):
+                assert_close(param, original_weights[name])
+
+        # validate lora_loaded map is updated
+        assert "adapter0" not in pipeline.lora_loaded
+
+
+# ======================================================
+# Test LTX2LoraLoaderMixin
+# ======================================================
+class DummyLTX2Pipeline(nn.Module, LTX2LoraLoaderMixin):
+    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
+        super().__init__()
+        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=True)
+        self.connectors = nn.Module()
+        self.connectors.text_proj_in = nn.Linear(d_model, d_model)
+
+
+class TestLTX2LoraLoaderMixin:
+    def test_load_lora_weights(self, mocker: MockerFixture):
+        pipeline = DummyLTX2Pipeline(NUM_LAYERS, HEAD_DIM, bias=True)
+        original_weights = {name: param.clone() for name, param in pipeline.named_parameters()}
+
+        transformer_sd = make_lora_state_dict_for_module(
+            pipeline.transformer, prefix="diffusion_model", remap_proj_out=False
+        )
+        assert len(transformer_sd) > 0
+
+        connectors_sd = make_lora_state_dict_for_module(pipeline.connectors, prefix="text_embedding_projection")
+        lora_state_dict = {}
+        lora_state_dict.update(transformer_sd)
+        lora_state_dict.update(connectors_sd)
+
+        mocker.patch(
+            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
+            return_value=_convert_non_diffusers_ltx2_lora_to_diffusers,
+        )
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+
+        # validate the weights are updated after lora loaded
+        for name, param in pipeline.named_parameters():
+            if name.endswith(".weight"):
+                assert not torch.allclose(param, original_weights[name])
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+    def test_unload_lora_weights(self, mocker: MockerFixture):
+        pipeline = DummyLTX2Pipeline(NUM_LAYERS, HEAD_DIM, bias=True)
+        original_weights = {name: param.clone() for name, param in pipeline.named_parameters()}
+
+        for k in original_weights.keys():
+            print(k)
+
+        transformer_sd = make_lora_state_dict_for_module(
+            pipeline.transformer, prefix="diffusion_model", remap_proj_out=False
+        )
+        assert len(transformer_sd) > 0
+
+        connectors_sd = make_lora_state_dict_for_module(pipeline.connectors, prefix="text_embedding_projection")
+        lora_state_dict = {}
+        lora_state_dict.update(transformer_sd)
+        lora_state_dict.update(connectors_sd)
+
+        mocker.patch(
+            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
+            return_value=_convert_non_diffusers_ltx2_lora_to_diffusers,
+        )
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+
+        # validate the weights are updated after lora loaded
+        for name, param in pipeline.named_parameters():
+            if name.endswith(".weight"):
+                assert not torch.allclose(param, original_weights[name])
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+        pipeline.unload_lora_weights("adapter0")
+        # validate the weights are restored after lora unloaded
+        for name, param in pipeline.named_parameters():
             if name.endswith(".weight"):
                 assert_close(param, original_weights[name])
 
