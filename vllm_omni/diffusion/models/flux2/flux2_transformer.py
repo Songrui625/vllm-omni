@@ -42,6 +42,9 @@ if TYPE_CHECKING:
 def _join_prefix(prefix: str, name: str) -> str:
     return f"{prefix}.{name}" if prefix else name
 
+if TYPE_CHECKING:
+    from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+
 
 class Flux2SwiGLU(nn.Module):
     """SwiGLU activation used by Flux2."""
@@ -856,7 +859,7 @@ class Flux2Transformer2DModel(nn.Module):
                     mlp_ratio=mlp_ratio,
                     eps=eps,
                     bias=False,
-                    quant_config=quant_config,
+                    quant_config=None,
                     prefix=f"transformer_blocks.{i}",
                 )
                 for i in range(num_layers)
