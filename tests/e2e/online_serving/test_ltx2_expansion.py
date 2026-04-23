@@ -17,13 +17,15 @@ import os
 
 import pytest
 
-from tests.conftest import (
+from tests.helpers.mark import hardware_marks
+from tests.helpers.media import (
+    generate_synthetic_image,
+)
+from tests.helpers.runtime import (
     OmniServer,
     OmniServerParams,
     OpenAIClientHandler,
-    generate_synthetic_image,
 )
-from tests.utils import hardware_marks
 
 PROMPT = "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage."
 NEGATIVE_PROMPT = "shaky, glitchy, low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly, transition, static."
