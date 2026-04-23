@@ -71,7 +71,7 @@ def _get_ltx2_feature_cases():
                     OmniServerParams(
                         model=model_path,
                         model_class_name=model_cls_name,
-                        server_args=server_args.extend(["--model-class-name", model_cls_name]),
+                        server_args=server_args,
                     ),
                     id=f"{model_cls_name}_{feat_id}",
                     marks=PARALLEL_FEATURE_MARKS,

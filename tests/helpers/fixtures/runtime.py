@@ -90,6 +90,7 @@ def omni_server(request: pytest.FixtureRequest, run_level: str, model_prefix: st
                     port=port,
                     env_dict=params.env_dict,
                     use_omni=params.use_omni,
+                    model_class_name=params.model_class_name,
                 )
                 if port
                 else OmniServer(
@@ -97,6 +98,7 @@ def omni_server(request: pytest.FixtureRequest, run_level: str, model_prefix: st
                     server_args,
                     env_dict=params.env_dict,
                     use_omni=params.use_omni,
+                    model_class_name=params.model_class_name,
                 )
             ) as server:
                 print("OmniServer started successfully")
