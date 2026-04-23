@@ -9,7 +9,7 @@ import json
 import os
 from collections.abc import Iterable
 from contextlib import nullcontext
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import torch
@@ -35,6 +35,7 @@ from vllm_omni.diffusion.lora.loader import LTX2LoraLoaderMixin
 from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.dmd2 import DMD2PipelineMixin
+from vllm_omni.diffusion.models.interface import SupportsModuleOffload
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 
@@ -1152,8 +1153,12 @@ class LTX2Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, LTX2LoraLoader
         return loader.load_weights(weights)
 
 
-class LTX2TwoStagesPipeline(nn.Module):
+class LTX2TwoStagesPipeline(nn.Module, SupportsModuleOffload):
     """LTX2TwoStagesPipeline is for two stages image to video generation"""
+
+    _dit_modules: ClassVar[list[str]] = ["pipe.transformer"]
+    _encoder_modules: ClassVar[list[str]] = ["pipe.text_encoder"]
+    _vae_modules: ClassVar[list[str]] = ["pipe.vae", "pipe.audio_vae"]
 
     def __init__(
         self,
