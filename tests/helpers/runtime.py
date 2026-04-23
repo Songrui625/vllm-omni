@@ -165,7 +165,7 @@ class OmniServer:
         if self.use_omni:
             cmd.append("--omni")
         if self.model_class_name:
-            self.serve_args.append(f"--model-class-name {self.model_class_name}")
+            self.serve_args.extend(["--model-class-name", self.model_class_name])
         cmd += self.serve_args
 
         print(f"Launching OmniServer with: {' '.join(cmd)}")
