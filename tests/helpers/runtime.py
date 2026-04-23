@@ -118,6 +118,7 @@ class OmniServerParams(NamedTuple):
     use_stage_cli: bool = False
     init_timeout: int | None = None
     stage_init_timeout: int | None = None  # None: fixture supplies default (600 s)
+    model_class_name: str | None = None
 
 
 class OmniServer:
@@ -131,6 +132,7 @@ class OmniServer:
         port: int | None = None,
         env_dict: dict[str, str] | None = None,
         use_omni: bool = True,
+        model_class_name: str | None = None,
     ) -> None:
         run_forced_gpu_cleanup_round()
         cleanup_dist_env_and_memory()
@@ -138,6 +140,7 @@ class OmniServer:
         self.serve_args = serve_args
         self.env_dict = env_dict
         self.use_omni = use_omni
+        self.model_class_name = model_class_name
         self.proc: subprocess.Popen | None = None
         self.host = "127.0.0.1"
         self.port = get_open_port() if port is None else port
@@ -161,6 +164,8 @@ class OmniServer:
         ]
         if self.use_omni:
             cmd.append("--omni")
+        if self.model_class_name:
+            cmd.append(f"--model-class-name {self.model_class_name}")
         cmd += self.serve_args
 
         print(f"Launching OmniServer with: {' '.join(cmd)}")
