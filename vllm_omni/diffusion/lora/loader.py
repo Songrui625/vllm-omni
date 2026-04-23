@@ -414,29 +414,45 @@ class LTX2LoraLoaderMixin(LoraLoaderMixin):
 
 
 class WanLoraLoaderMixin(LoraLoaderMixin):
-    supported_ckpt_mapping = {
-        "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors": "transformer",
-        "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors": "transformer_2",
-        "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors": "transformer",
-        "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors": "transformer_2",
-        "high_noise_model.safetensors": "transformer",
-        "low_noise_model.safetensors": "transformer_2",
-    }
+    transformer_2_name = "transformer_2"
 
     def load_lora_weights(
         self,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path: str | list[str],
         adapter_name: str | None = None,
     ):
+        """Load LoRA weights into the pipeline's transformer(s).
+
+        Args:
+            pretrained_model_name_or_path: Path(s) to concrete .safetensors LoRA files.
+                - str: a single .safetensors file. Only valid for Wan2.1
+                  (single-transformer pipelines).
+                - list[str]: one file per transformer, matched **by position** to
+                  [transformer, transformer_2]. Required for Wan2.2 MoE.
+            adapter_name: Name to register the adapter under.
+        """
         if adapter_name in self.lora_loaded:
             return
 
-        cls_name = self.__class__.__name__
-        task = "i2v" if "I2V" in cls_name else "t2v"
-        module_to_lora_sd = dict()
+        # Normalize to list[(lora_path, target_module_name)].
+        lora_paths = None
+        if isinstance(pretrained_model_name_or_path, str):
+            lora_paths = [pretrained_model_name_or_path]
+        else:
+            lora_paths = list(pretrained_model_name_or_path)
 
-        lora_paths = self._get_target_lora_paths(pretrained_model_name_or_path, self.has_transformer_2, task=task)
-        for lora_path in lora_paths:
+        target_modules = (
+            [self.transformer_name, self.transformer_2_name] if self.has_transformer_2 else [self.transformer_name]
+        )
+        if len(lora_paths) != len(target_modules):
+            raise ValueError(
+                f"{self.__class__.__name__} expects {len(target_modules)} LoRA file(s) "
+                f"(target_modules={target_modules}, paths={lora_paths}), got {len(lora_paths)}. Pass a list of concrete "  # noqa
+                f".safetensors files, one per transformer."
+            )
+
+        module_to_lora_sd = dict()
+        for lora_path, target_module_name in zip(lora_paths, target_modules):
             state_dict = _load_lora_state_dict(lora_path)
             is_non_diffusers_format = any(k.startswith("diffusion_model.") for k in state_dict)
             if is_non_diffusers_format:
@@ -461,17 +477,17 @@ class WanLoraLoaderMixin(LoraLoaderMixin):
                 ],
             )
 
-            if self.has_transformer_2:
-                # wan22 load path
-                filename = os.path.basename(lora_path)
-                target_module_name = self.supported_ckpt_mapping[filename]
-                module = getattr(find_module_with_attr(self, target_module_name), target_module_name)
-                self.load_lora_into_module(state_dict, module, prefix=self.transformer_name, lora_bias_suffix="bias")
-                module_to_lora_sd[target_module_name] = state_dict
-            else:
-                # wan21 load path
-                self.load_lora_into_module(state_dict, self.transformer, prefix=self.transformer_name)
-                module_to_lora_sd[self.transformer_name] = state_dict
+            module = get_transformer_from_pipeline(self)
+            if module is None:
+                logger.warning(
+                    f"Skip LoRA {lora_path}: target module '{target_module_name}' "
+                    f"is not loaded in pipeline {self.__class__.__name__} "
+                    f"(e.g. disabled by boundary_ratio)."
+                )
+                continue
+
+            self.load_lora_into_module(state_dict, module, prefix=self.transformer_name, lora_bias_suffix="bias")
+            module_to_lora_sd[target_module_name] = state_dict
 
         self.lora_loaded[adapter_name] = module_to_lora_sd
 
@@ -485,31 +501,3 @@ class WanLoraLoaderMixin(LoraLoaderMixin):
             self.unload_module_lora(lora_sd, module, prefix=self.transformer_name)
 
         del self.lora_loaded[adapter_name]
-
-    def _get_target_lora_paths(
-        self,
-        pretrained_model_name_or_path,
-        is_wan22: bool = True,
-        task: str = "t2v",
-    ):
-        lora_paths = []
-        if os.path.isdir(pretrained_model_name_or_path):
-            for filename in os.listdir(pretrained_model_name_or_path):
-                if not filename.endswith(".safetensors"):
-                    continue
-                if filename not in self.supported_ckpt_mapping:
-                    continue
-                if task in filename.lower():
-                    lora_paths.append(os.path.join(pretrained_model_name_or_path, filename))
-
-            return lora_paths
-
-        if is_wan22:
-            raise ValueError("Wan22 distilled LoRA weights are not supported by directory")
-
-        filename = os.path.basename(pretrained_model_name_or_path).lower()
-        if task not in filename:
-            raise ValueError(f"LoRA weights {pretrained_model_name_or_path} is not a {task} LoRA weights")
-
-        lora_paths.append(pretrained_model_name_or_path)
-        return lora_paths
