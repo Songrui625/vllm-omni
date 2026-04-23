@@ -43,6 +43,7 @@ PARALLEL_CONFIGS = [
     ("cfg_parallel", ["--cfg-parallel-size", "2"]),
     ("ulysses_sp", ["--usp", "2"]),
     ("ring_atten", ["--ring", "2"]),
+    ("hsdp", ["--use-hsdp", "--hsdp-shard-size", "2"]),
 ]
 
 
