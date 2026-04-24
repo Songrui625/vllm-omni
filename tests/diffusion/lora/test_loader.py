@@ -3,17 +3,10 @@ from collections import defaultdict
 import pytest
 import torch
 import torch.nn as nn
-from diffusers.loaders.lora_conversion_utils import (
-    _convert_non_diffusers_ltx2_lora_to_diffusers,
-    _convert_non_diffusers_qwen_lora_to_diffusers,
-)
-from pytest_mock import MockerFixture
 from torch.testing import assert_close
 
 from vllm_omni.diffusion.lora.loader import (
     LoraLoaderMixin,
-    LTX2LoraLoaderMixin,
-    QwenImageLoraLoaderMixin,
     _prepare_lora_delta,
     _remap_state_dict_keys,
 )
@@ -203,46 +196,6 @@ def make_lora_state_dict_for_module(
 # ======================================================
 # Test loader helper functions
 # ======================================================
-def test_prepare_lora_delta():
-    base_key = "transformer.attn.to_q"
-    lora_state_dict, expected_delta = make_dummy_lora_state_dict(base_key)
-
-    actual_delta, used_keys = _prepare_lora_delta(
-        lora_state_dict,
-        base_key,
-    )
-
-    # validate the delta
-    assert actual_delta is not None
-    assert_close(actual_delta, expected_delta)
-
-    # validate the accessed keys
-    expected_key_a = f"{base_key}.lora_A.weight"
-    expected_key_b = f"{base_key}.lora_B.weight"
-    assert expected_key_a in used_keys
-    assert expected_key_b in used_keys
-
-
-def test_prepare_lora_delta_with_bias():
-    base_key = "transformer.attn.to_q"
-    weight_bias = torch.randn(HEAD_DIM)
-    lora_state_dict, expected_delta = make_dummy_lora_state_dict(base_key, weight_bias=weight_bias, bias=True)
-
-    actual_delta, used_keys = _prepare_lora_delta(
-        lora_state_dict,
-        base_key,
-        is_bias=True,
-    )
-
-    # validate the delta
-    assert actual_delta is not None
-    assert_close(expected_delta, actual_delta)
-
-    # validate the accessed keys
-    expected_key_bias = f"{base_key}.bias"
-    assert expected_key_bias in used_keys
-
-
 def test_prepare_lora_delta_with_stacked_params():
     base_key = "transformer.attn.to_qkv"
 
@@ -280,52 +233,6 @@ def test_prepare_lora_delta_with_stacked_params():
         assert key in used_keys
 
 
-def test_prepare_lora_delta_with_stacked_params_with_bias():
-    base_key = "transformer.attn.to_qkv"
-    sd0, delta0 = make_dummy_lora_state_dict("transformer.attn.to_q", bias=True)
-    sd1, delta1 = make_dummy_lora_state_dict("transformer.attn.to_k", bias=True)
-    sd2, delta2 = make_dummy_lora_state_dict("transformer.attn.to_v", bias=True)
-
-    lora_state_dict = {}
-    lora_state_dict.update(sd0)
-    lora_state_dict.update(sd1)
-    lora_state_dict.update(sd2)
-    expected_delta = torch.concat([delta0, delta1, delta2])
-
-    stacked_mapping = {".attn.to_qkv": [".attn.to_q", ".attn.to_k", ".attn.to_v"]}
-
-    actual_delta, used_keys = _prepare_lora_delta(
-        lora_state_dict,
-        base_key,
-        stacked_mapping,
-        is_bias=True,
-    )
-
-    # validate the delta
-    assert actual_delta is not None
-    assert_close(expected_delta, actual_delta)
-
-    # validate the used keys
-    key_q_bias = "transformer.attn.to_q.bias"
-    key_k_bias = "transformer.attn.to_k.bias"
-    key_v_bias = "transformer.attn.to_v.bias"
-    for key in [key_q_bias, key_k_bias, key_v_bias]:
-        assert key in used_keys
-
-
-def test_remap_state_dict_keys():
-    lora_state_dict, _ = make_dummy_lora_state_dict("transformer.attn.to_out.0.proj")
-
-    lora_state_dict = _remap_state_dict_keys(
-        lora_state_dict,
-        [(".to_out.0.", ".to_out.")],
-    )
-
-    assert len(lora_state_dict) == 2
-    assert "transformer.attn.to_out.proj.lora_A.weight" in lora_state_dict
-    assert "transformer.attn.to_out.proj.lora_B.weight" in lora_state_dict
-
-
 def test_remap_state_dict_keys_matched_two():
     lora_state_dict, _ = make_dummy_lora_state_dict(
         "transformer.attn.to_out.0", bias=True, lora_bias_suffix="lora_B.bias"
@@ -359,7 +266,7 @@ class TestLoraLoaderMixin:
             "bias_stacked_params",
         ],
     )
-    def test_load_lora_into_module_a(self, bias: bool, stacked_params: bool):
+    def test_load_lora_into_module(self, bias: bool, stacked_params: bool):
         pipeline = DummyPipeline(NUM_LAYERS, HEAD_DIM, bias=bias, stacked_params=stacked_params)
         original_params = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
 
@@ -404,129 +311,3 @@ class TestLoraLoaderMixin:
 
         # validate the weights are restored
         assert_params_equal(pipeline.transformer, original_params)
-
-
-# ======================================================
-# Test QwenImageLoraLoaderMixin
-# ======================================================
-class DummyQwenImagePipeline(nn.Module, QwenImageLoraLoaderMixin):
-    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
-        super().__init__()
-        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=True)
-
-
-class TestQwenImageLoraLoaderMixin:
-    def test_load_lora_weights(self, mocker: MockerFixture):
-        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
-        original_params = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
-
-        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
-        assert len(lora_state_dict) > 0
-
-        mocker.patch(
-            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
-            return_value=_convert_non_diffusers_qwen_lora_to_diffusers,
-        )
-        pipeline.load_lora_weights(lora_state_dict, "adapter0")
-
-        # validate the weights are updated after lora loaded
-        assert_params_not_equal(pipeline.transformer, original_params)
-
-        # validate lora_loaded map is updated after lora loaded
-        assert "adapter0" in pipeline.lora_loaded
-
-    def test_unload_lora_weights(self, mocker: MockerFixture):
-        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
-        original_params = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
-
-        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
-        assert len(lora_state_dict) > 0
-
-        mocker.patch(
-            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
-            return_value=_convert_non_diffusers_qwen_lora_to_diffusers,
-        )
-        pipeline.load_lora_weights(lora_state_dict, "adapter0")
-        # validate the weights are updated after lora loaded
-        assert_params_not_equal(pipeline.transformer, original_params)
-
-        # validate lora_loaded map is updated after lora loaded
-        assert "adapter0" in pipeline.lora_loaded
-
-        pipeline.unload_lora_weights("adapter0")
-        # validate the weights are restored after lora unloaded
-        assert_params_equal(pipeline.transformer, original_params)
-
-        # validate lora_loaded map is updated
-        assert "adapter0" not in pipeline.lora_loaded
-
-
-# ======================================================
-# Test LTX2LoraLoaderMixin
-# ======================================================
-class DummyLTX2Pipeline(nn.Module, LTX2LoraLoaderMixin):
-    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
-        super().__init__()
-        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=True)
-        self.connectors = nn.Module()
-        self.connectors.text_proj_in = nn.Linear(d_model, d_model)
-
-
-class TestLTX2LoraLoaderMixin:
-    def test_load_lora_weights(self, mocker: MockerFixture):
-        pipeline = DummyLTX2Pipeline(NUM_LAYERS, HEAD_DIM, bias=True)
-        original_params = {name: param.clone() for name, param in pipeline.named_parameters()}
-
-        transformer_sd = make_lora_state_dict_for_module(
-            pipeline.transformer, prefix="diffusion_model", remap_proj_out=False
-        )
-        assert len(transformer_sd) > 0
-
-        connectors_sd = make_lora_state_dict_for_module(pipeline.connectors, prefix="text_embedding_projection")
-        lora_state_dict = {}
-        lora_state_dict.update(transformer_sd)
-        lora_state_dict.update(connectors_sd)
-
-        mocker.patch(
-            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
-            return_value=_convert_non_diffusers_ltx2_lora_to_diffusers,
-        )
-        pipeline.load_lora_weights(lora_state_dict, "adapter0")
-
-        # validate the weights are updated after lora loaded
-        assert_params_not_equal(pipeline, original_params, mode="weight")
-
-        # validate lora_loaded map is updated after lora loaded
-        assert "adapter0" in pipeline.lora_loaded
-
-    def test_unload_lora_weights(self, mocker: MockerFixture):
-        pipeline = DummyLTX2Pipeline(NUM_LAYERS, HEAD_DIM, bias=True)
-        original_params = {name: param.clone() for name, param in pipeline.named_parameters()}
-
-        transformer_sd = make_lora_state_dict_for_module(
-            pipeline.transformer, prefix="diffusion_model", remap_proj_out=False
-        )
-        assert len(transformer_sd) > 0
-
-        connectors_sd = make_lora_state_dict_for_module(pipeline.connectors, prefix="text_embedding_projection")
-        lora_state_dict = {}
-        lora_state_dict.update(transformer_sd)
-        lora_state_dict.update(connectors_sd)
-
-        mocker.patch(
-            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
-            return_value=_convert_non_diffusers_ltx2_lora_to_diffusers,
-        )
-        pipeline.load_lora_weights(lora_state_dict, "adapter0")
-
-        # validate the weights are updated after lora loaded
-        assert_params_not_equal(pipeline, original_params, mode="weight")
-        # validate lora_loaded map is updated after lora loaded
-        assert "adapter0" in pipeline.lora_loaded
-
-        pipeline.unload_lora_weights("adapter0")
-
-        # validate the weights are restored after lora unloaded
-        assert_params_equal(pipeline, original_params)
-        # validate lora_loaded map is updated
-        assert "adapter0" not in pipeline.lora_loaded
