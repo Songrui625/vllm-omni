@@ -39,7 +39,7 @@ from vllm_omni.diffusion.distributed.parallel_state import (
 )
 from vllm_omni.diffusion.forward_context import set_forward_context
 from vllm_omni.diffusion.ipc import pack_diffusion_output_shm
-from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager
+from vllm_omni.diffusion.lora.manager import DiffusionLoRAManager, LoRABackend
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.sched.interface import DiffusionSchedulerOutput
 from vllm_omni.diffusion.worker.diffusion_model_runner import DiffusionModelRunner
@@ -194,7 +194,9 @@ class DiffusionWorker:
         """Initialize the LoRA manager for this worker."""
         if self.model_runner.pipeline is None:
             return
-        try:
+
+        lora_backend = self.od_config.lora_backend
+        if lora_backend == LoRABackend.PEFT:
             self.lora_manager = DiffusionLoRAManager(
                 pipeline=self.model_runner.pipeline,
                 device=self.device,
@@ -203,11 +205,12 @@ class DiffusionWorker:
                 lora_path=self.od_config.lora_path,
                 lora_scale=self.od_config.lora_scale,
             )
-        except Exception:
-            # fallback to load distilled LoRA
+        elif lora_backend == LoRABackend.DISTILL:
             pipeline = self.model_runner.pipeline
             if hasattr(pipeline, "load_lora_weights"):
                 pipeline.load_lora_weights(self.od_config.lora_path)
+        else:
+            raise ValueError(f"Unknown LoRA backend: {lora_backend}. Available choices: {LoRABackend.__members__}")
 
     def generate(self, request: OmniDiffusionRequest) -> DiffusionOutput:
         """Generate output for the given requests."""

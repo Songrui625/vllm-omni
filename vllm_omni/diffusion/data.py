@@ -18,6 +18,7 @@ from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig,
 )
 
+from vllm_omni.diffusion.lora.manager import LoRABackend
 from vllm_omni.diffusion.model_metadata import get_diffusion_model_metadata
 from vllm_omni.diffusion.utils.network_utils import is_port_available
 from vllm_omni.quantization import build_quant_config
@@ -397,8 +398,9 @@ class OmniDiffusionConfig:
     # pipeline_config: PipelineConfig = field(default_factory=PipelineConfig, repr=False)
 
     # LoRA parameters
-    lora_path: str | None = None
-    lora_scale: float = 1.0
+    lora_path: str | list[str] | None = None
+    lora_scale: float | list[float] = 1.0
+    lora_backend: LoRABackend = LoRABackend.PEFT  # available choices: ["peft", "distill"]
     max_cpu_loras: int | None = None
 
     output_type: str = "pil"

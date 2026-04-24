@@ -1450,6 +1450,9 @@ class AsyncOmniEngine:
                 if lora_scale is not None:
                     if not hasattr(cfg.engine_args, "lora_scale") or cfg.engine_args.lora_scale is None:
                         cfg.engine_args.lora_scale = lora_scale
+                if kwargs.get("lora_backend") is not None:
+                    if not hasattr(cfg.engine_args, "lora_backend") or cfg.engine_args.lora_backend is None:
+                        cfg.engine_args.lora_backend = kwargs["lora_backend"]
                 quantization_config = kwargs.get("quantization_config")
                 if quantization_config is not None:
                     if (
