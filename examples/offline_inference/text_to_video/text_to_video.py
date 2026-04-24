@@ -190,14 +190,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lora-path",
         type=str,
+        nargs="+",
         default=None,
-        help="Path to LoRA adapter folder (PEFT format). Loaded at initialization and used for generation.",
+        help="Path to LoRA adapter folder (PEFT format) or concrete LoRA checkpoint files. Loaded at initialization and used for generation."
+        "Note: for Wan2.2 MoE models, two checkpoints positionally mapped to high-noise and low-noise modules.",
     )
     parser.add_argument(
         "--lora-scale",
         type=float,
         default=1.0,
         help="Scale factor for LoRA weights (default: 1.0).",
+    )
+    parser.add_argument(
+        "--lora-backend",
+        type=str,
+        default="peft",
+        help="LoRA backend for loading LoRA adapters. Default: peft",
     )
     return parser.parse_args()
 
@@ -265,7 +273,11 @@ def main():
         omni_kwargs["cache_config"] = cache_config
         omni_kwargs["enable_cache_dit_summary"] = args.enable_cache_dit_summary
     if args.lora_path is not None:
-        omni_kwargs["lora_path"] = args.lora_path
+        lora_path = args.lora_path
+        if len(lora_path) == 1:
+            lora_path = lora_path[0]
+        omni_kwargs["lora_path"] = lora_path
+        omni_kwargs["lora_backend"] = args.lora_backend
 
     omni = Omni(**omni_kwargs)
 
@@ -288,12 +300,16 @@ def main():
     print(f"{'=' * 60}\n")
 
     lora_request = None
-    if args.lora_path:
-        lora_request_id = stable_lora_int_id(args.lora_path)
+    if args.lora_path and args.lora_backend == "peft":
+        if len(args.lora_path) != 1:
+            raise ValueError("Only one LoRA path is expected for PEFT backend.")
+
+        lora_path = args.lora_path[0]
+        lora_request_id = stable_lora_int_id(lora_path)
         lora_request = LoRARequest(
-            lora_name=Path(args.lora_path).stem,
+            lora_name=Path(lora_path).stem,
             lora_int_id=lora_request_id,
-            lora_path=args.lora_path,
+            lora_path=lora_path,
         )
 
     prompt_dict = {"prompt": args.prompt}
@@ -304,6 +320,7 @@ def main():
     if lora_request:
         extra_args["lora_request"] = lora_request
         extra_args["lora_scale"] = args.lora_scale
+        extra_args["lora_backend"] = args.lora_backend
 
     sampling_kwargs = dict(
         height=args.height,
