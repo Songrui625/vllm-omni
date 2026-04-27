@@ -859,7 +859,7 @@ class Flux2Transformer2DModel(nn.Module):
                     mlp_ratio=mlp_ratio,
                     eps=eps,
                     bias=False,
-                    quant_config=None,
+                    quant_config=safe_quant_config(quant_config),
                     prefix=f"transformer_blocks.{i}",
                 )
                 for i in range(num_layers)
