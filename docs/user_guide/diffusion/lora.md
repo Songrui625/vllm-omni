@@ -1,14 +1,18 @@
 # LoRA (Low-Rank Adaptation) Guide
 
-LoRA (Low-Rank Adaptation) enables fine-tuning diffusion models by adding trainable low-rank matrices to existing model weights. vLLM-Omni currently supports PEFT-style LoRA adapters, allowing you to customize model behavior without modifying the base model weights.
+LoRA (Low-Rank Adaptation) enables fine-tuning diffusion models by adding trainable low-rank matrices to existing model weights. vLLM-Omni supports two LoRA backends: **PEFT** for PEFT-style adapters, and **Distill** usually for few-steps inference. **PEFT** backend allowing you to customize model behavior without modifying the base model weights. **Distill** backend fuse LoRA weights into the base model at initialization.
 
 ## Overview
 
-LoRA adapters are lightweight, model-specific fine-tuning weights that can be dynamically loaded and applied to diffusion models. vLLM-Omni uses a unified LoRA handling mechanism similar to vLLM with LRU cache management.
+LoRA adapters are lightweight, model-specific fine-tuning weights that can be applied to diffusion models in two ways:
+
+- **PEFT backend** (`--lora-backend peft`, default): Loads a PEFT-format adapter folder via `DiffusionLoRAManager`. Adapters are cached (LRU) and activated per request via `LoRARequest`. It uses a unified LoRA handling mechanism s similar to vLLM with LRU cache management.
+- **Distill backend** (`--lora-backend distill`): Calls `pipeline.load_lora_weights` once at initialization to fuse one or more concrete checkpoint files directly into the base weights. Typically used for distilled few-step LoRAs (e.g. Lightning, LightX2V).
 
 ## LoRA Adapter Format
 
-LoRA adapters must be in **PEFT (Parameter-Efficient Fine-Tuning)** format. A typical LoRA adapter directory structure:
+### PEFT (Parameter-Efficient Fine-Tuning) format (default)
+A typical PEFT-format LoRA adapter directory structure:
 
 ```
 lora_adapter/
@@ -25,19 +29,20 @@ The `adapter_config.json` file contains metadata about the LoRA adapter, includi
 
 ### Offline Inference
 
-#### Pre-loaded LoRA
+#### PEFT backend: pre-loaded LoRA
 
-Load a LoRA adapter at initialization. This adapter is pre-loaded into the cache and can be activated by requests:
+Load a PEFT-format LoRA adapter at initialization. The adapter is pre-loaded into the cache and can be activated per request:
 
 ```python
 from vllm_omni import Omni
 from vllm_omni.lora.request import LoRARequest
 
-lora_path="/path/to/lora_adapter"
+lora_path = "/path/to/lora_adapter"
 
 omni = Omni(
     model="stabilityai/stable-diffusion-3.5-medium",
-    lora_path=lora_path
+    lora_path=lora_path,
+    lora_backend="peft",  # default, can be omitted
 )
 
 lora_request = LoRARequest(
@@ -51,6 +56,49 @@ outputs = omni.generate(
     lora_request=lora_request,
     lora_scale=2.0, # optional arg, default 1.0
 )
+```
+
+#### Distill backend: fuse distilled LoRA at init
+
+For distilled few-step LoRAs, pass `lora_backend="distill"` together with one or more concrete `.safetensors` files. The weights are fused into the base model once at init; subsequent `generate()` calls do not need a `LoRARequest`.
+
+Single-file example (Qwen-Image-Lightning):
+
+```python
+from vllm_omni import Omni
+
+omni = Omni(
+    model="Qwen/Qwen-Image-2512",
+    lora_path="/path/to/Qwen-Image-2512-Lightning.safetensors",
+    lora_backend="distill",
+)
+
+outputs = omni.generate(prompt="A piece of cheesecake")
+```
+
+Multi-file example (Wan2.2 MoE, high + low noise):
+
+```python
+from vllm_omni import Omni
+
+omni = Omni(
+    model="Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    lora_path=[
+        "/path/to/wan2.2_high_noise_lora.safetensors",   # -> transformer
+        "/path/to/wan2.2_low_noise_lora.safetensors",    # -> transformer_2
+    ],
+    lora_backend="distill",
+)
+```
+
+The CLI examples under `examples/offline_inference/` accept the same flags, e.g.:
+
+```bash
+python examples/offline_inference/text_to_video/text_to_video.py \
+  --model Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+  --lora-backend distill \
+  --lora-path /path/to/high.safetensors /path/to/low.safetensors \
+  --prompt "A cat playing with yarn"
 ```
 
 !!! note "Server-side Path Requirement"
@@ -141,6 +189,7 @@ Notes:
 
 - This route avoids runtime LoRA loading changes in vLLM-Omni when you choose to bake converted weights into a local Diffusers directory.
 - Output quality and speed depend on the replacement checkpoints and sampling params you choose.
+- If you only need to fuse distilled LoRAs into a Wan2.2 checkpoint at load time (without the full LightX2V convert + assemble pipeline), you can instead pass them directly via `--lora-backend distill --lora-path <high>.safetensors <low>.safetensors`. See the [Distill backend](#distill-backend-fuse-distilled-lora-at-init) section above.
 
 
 ## See Also
