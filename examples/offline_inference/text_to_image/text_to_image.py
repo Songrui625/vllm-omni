@@ -233,7 +233,10 @@ def parse_args() -> argparse.Namespace:
         "--lora-backend",
         type=str,
         default="peft",
-        help="LoRA backend for loading LoRA adapters. Default: peft",
+        choices=["peft", "distill"],
+        help="LoRA backend for loading LoRA adapters. Default: peft"
+        "'peft' loads a PEFT-format adapter folder, used e.g. for RL"
+        "'distill' fuses one or more concrete LoRA checkpoint files, used e.g. for distilled few-step LoRAs",
     )
     parser.add_argument(
         "--vae-patch-parallel-size",
