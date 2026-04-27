@@ -367,7 +367,6 @@ def main():
     if lora_request:
         extra_args["lora_request"] = lora_request
         extra_args["lora_scale"] = args.lora_scale
-        extra_args["lora_backend"] = args.lora_backend
 
     sampling_kwargs = dict(
         height=args.height,
