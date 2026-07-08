@@ -1,12 +1,12 @@
 # LoRA (Low-Rank Adaptation) Guide
 
-LoRA (Low-Rank Adaptation) enables fine-tuning diffusion models by adding trainable low-rank matrices to existing model weights. vLLM-Omni supports two LoRA backends: **PEFT** for PEFT-style adapters, and **Distill** usually for few-steps inference. **PEFT** backend allowing you to customize model behavior without modifying the base model weights. **Distill** backend fuse LoRA weights into the base model at initialization.
+LoRA (Low-Rank Adaptation) enables fine-tuning diffusion models by adding trainable low-rank matrices to existing model weights. vLLM-Omni supports two LoRA backends: **PEFT** for PEFT-style adapters, and **Distill** usually for few-steps inference. **PEFT** backend allows you to customize model behavior without modifying the base model weights. **Distill** backend fuses LoRA weights into the base model at initialization.
 
 ## Overview
 
 LoRA adapters are lightweight, model-specific fine-tuning weights that can be applied to diffusion models in two ways:
 
-- **PEFT backend** (`--lora-backend peft`, default): Loads a PEFT-format adapter folder via `DiffusionLoRAManager`. Adapters are cached (LRU) and activated per request via `LoRARequest`. It uses a unified LoRA handling mechanism s similar to vLLM with LRU cache management.
+- **PEFT backend** (`--lora-backend peft`, default): Loads a PEFT-format adapter folder via `DiffusionLoRAManager`. Adapters are cached (LRU) and activated per request via `LoRARequest`. It uses a unified LoRA handling mechanisms similar to vLLM with LRU cache management.
 - **Distill backend** (`--lora-backend distill`): Calls `pipeline.load_lora_weights` once at initialization to fuse one or more concrete checkpoint files directly into the base weights. Typically used for distilled few-step LoRAs (e.g. Lightning, LightX2V).
 
 ## LoRA Adapter Format
@@ -61,6 +61,20 @@ outputs = omni.generate(
 #### Distill backend: fuse distilled LoRA at init
 
 For distilled few-step LoRAs, pass `lora_backend="distill"` together with one or more concrete `.safetensors` files. The weights are fused into the base model once at init; subsequent `generate()` calls do not need a `LoRARequest`.
+
+##### Supported pipelines
+
+For Qwen-Image and Wan pipelines, the distill backend calls `pipeline.load_lora_weights(...)` during worker initialization. LTX-2 two-stage pipelines load the stage-2 distilled LoRA internally during the second stage.
+
+| Pipeline | Supported distilled LoRA repo | Notes |
+|----------|--------------------------------|-------|
+| `QwenImagePipeline` | `lightx2v/Qwen-Image-2512-Lightning` | Used with Qwen-Image-2512 Lightning-style few-step inference. |
+| `Wan22Pipeline` | `lightx2v/Wan2.1-Distill-Loras`, `lightx2v/Wan2.2-Distill-Loras` | Wan2.1 uses one LoRA file. For dual-transformer Wan2.2 MoE, pass high-noise then low-noise LoRA files. |
+| `Wan22I2VPipeline` | `lightx2v/Wan2.2-Distill-Loras` | For dual-transformer Wan2.2 MoE, pass high-noise then low-noise LoRA files. |
+| `LTX2TwoStagesPipeline` | `Lightricks/LTX-2` | Loads `ltx-2-19b-distilled-lora-384.safetensors` from the model directory for stage 2. |
+| `LTX2ImageToVideoTwoStagesPipeline` | `Lightricks/LTX-2` | Loads `ltx-2-19b-distilled-lora-384.safetensors` from the model directory for stage 2. |
+
+Other diffusion pipelines are not currently listed as supporting distilled LoRA. Use the PEFT backend for request-time adapters, or bake converted weights into a local Diffusers directory before serving.
 
 Single-file example (Qwen-Image-Lightning):
 
