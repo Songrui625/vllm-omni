@@ -477,7 +477,7 @@ class WanLoraLoaderMixin(LoraLoaderMixin):
                 ],
             )
 
-            module = get_transformer_from_pipeline(self)
+            module = find_module_with_attr(self, target_module_name)
             if module is None:
                 logger.warning(
                     f"Skip LoRA {lora_path}: target module '{target_module_name}' "
