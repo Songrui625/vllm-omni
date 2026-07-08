@@ -1,0 +1,16 @@
+tests/diffusion/lora/test_loader.py
+  h_5d66c6d0c5eeb9 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03a38c26d2cf45c4ae263559560d1f573f769053",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
