@@ -1,0 +1,33 @@
+vllm_omni/diffusion/worker/diffusion_worker.py
+  h_5d66c6d0c5eeb9 228 gitai:{"mixed_line_ranges":[{"Single":228}],"operations":[]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ce8de57c53418722b8f11431797316b095fcfd59",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {
+    "vllm_omni/diffusion/worker/diffusion_worker.py": [
+      {
+        "hash": "h_5d66c6d0c5eeb9",
+        "line_ranges": [
+          {
+            "Single": 228
+          }
+        ],
+        "mixed_line_ranges": [
+          {
+            "Single": 228
+          }
+        ],
+        "operations": []
+      }
+    ]
+  },
+  "remote_transcripts": {}
+}
