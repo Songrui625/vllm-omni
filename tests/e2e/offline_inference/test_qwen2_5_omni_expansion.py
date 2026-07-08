@@ -39,7 +39,8 @@ else:
     stage_config = get_cuda_graph_config()
 
 # Create parameter combinations for model and stage config
-test_params = [(model, stage_config) for model in models]
+# Qwen2.5-Omni with TP=3 needs longer init timeout
+test_params = [(model, stage_config, {"stage_init_timeout": 1200, "init_timeout": 1800}) for model in models]
 
 
 def get_question(prompt_type="mix"):
@@ -50,7 +51,7 @@ def get_question(prompt_type="mix"):
     return prompts.get(prompt_type, prompts["mix"])
 
 
-@pytest.mark.advanced_model
+@pytest.mark.slow
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4", "rocm": "MI325", "xpu": "B60"}, num_cards={"cuda": 4, "rocm": 2, "xpu": 3})
 @pytest.mark.parametrize("omni_runner", test_params, indirect=True)
@@ -78,10 +79,10 @@ def test_mix_to_audio(omni_runner, omni_runner_handler) -> None:
     }
 
     # Test single completion
-    omni_runner_handler.send_request(request_config)
+    omni_runner_handler.send_omni_request(request_config)
 
 
-@pytest.mark.advanced_model
+@pytest.mark.slow
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4", "rocm": "MI325", "xpu": "B60"}, num_cards={"cuda": 4, "rocm": 2, "xpu": 3})
 @pytest.mark.parametrize("omni_runner", test_params, indirect=True)
@@ -98,4 +99,4 @@ def test_text_to_text(omni_runner, omni_runner_handler) -> None:
     request_config = {"prompts": get_question("text_only"), "modalities": ["text"]}
 
     # Test single completion
-    omni_runner_handler.send_request(request_config)
+    omni_runner_handler.send_omni_request(request_config)

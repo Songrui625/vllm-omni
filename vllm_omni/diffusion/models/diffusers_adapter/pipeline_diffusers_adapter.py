@@ -13,21 +13,42 @@ It does NOT support:
 - Step-wise execution (continuous batching)
 """
 
+import inspect
 import logging
-import os
-from typing import Any
+import re
+from typing import Any, cast
 
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from torch import nn
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.models.diffusers_adapter.pipeline_utils import BasePipelineUtils, get_pipeline_utils
+from vllm_omni.diffusion.models.diffusers_adapter.quantization_utils import (
+    apply_diffusers_quantization_config,
+    convert_diffusers_quantization_config,
+    ensure_supported_diffusers_quantization,
+)
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
-from vllm_omni.diffusion.request import OmniDiffusionRequest
-from vllm_omni.inputs.data import OmniPromptType
+from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
+from vllm_omni.inputs.data import OmniPromptType, OmniTextPrompt
 from vllm_omni.platforms import current_omni_platform
 
 logger = logging.getLogger(__name__)
+
+_DIFFUSERS_CONFIG_LOAD_KWARGS = {
+    "cache_dir",
+    "dduf_entries",
+    "force_download",
+    "local_dir",
+    "local_dir_use_symlinks",
+    "local_files_only",
+    "proxies",
+    "revision",
+    "subfolder",
+    "token",
+    "user_agent",
+}
 
 
 class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
@@ -44,14 +65,17 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
     batching mode.
     """
 
+    supports_request_batch = False
     supports_step_execution: bool = False
 
     def __init__(self, *, od_config: OmniDiffusionConfig, device: torch.device | None = None):
         super().__init__()
         self._pipeline: DiffusionPipeline
+        self._accept_call_kwargs: set[str] | None = None  # None to accept all kwargs
         self.od_config = od_config
         self.device = device
         self._capabilities: dict[str, Any] = {}
+        self._pipeline_utils: BasePipelineUtils = BasePipelineUtils()
         self._raise_unsupported_features()
 
         self.setup_diffusion_pipeline_profiler(
@@ -75,12 +99,27 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
             "torch_dtype": dtype,
             **self.od_config.diffusers_load_kwargs,
         }
+        convert_diffusers_quantization_config(load_kwargs)
+
+        pipeline_class = self.od_config.diffusers_pipeline_cls
+        pipeline_class_name = pipeline_class.__name__ if pipeline_class is not None else None
+        self._pipeline_utils = get_pipeline_utils(pipeline_class_name)
+        self._pipeline_utils.update_load_kwargs(self.od_config, load_kwargs)
+        component_names = (
+            self._load_diffusers_component_names(model_id, load_kwargs)
+            if self.od_config.quantization_config is not None and "quantization_config" not in load_kwargs
+            else {}
+        )
+        apply_diffusers_quantization_config(self.od_config, load_kwargs, component_names)
         logger.debug(f"Loading diffusers pipeline with kwargs: {load_kwargs}")
 
-        self._pipeline = DiffusionPipeline.from_pretrained(
-            model_id,
-            **load_kwargs,
-        ).to(self.device)
+        self._pipeline = DiffusionPipeline.from_pretrained(model_id, **load_kwargs)
+        self._pipeline_utils.apply_post_load_updates(self._pipeline, self.od_config)
+
+        self._pipeline.to(self.device)
+
+        # Cache __call__kwargs signature introspection for later input validation
+        self._accept_call_kwargs = set(inspect.signature(self._pipeline.__call__).parameters.keys())
 
         # CPU offloading
         if self.od_config.enable_layerwise_offload:
@@ -139,9 +178,8 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
     # Forward pass
     # ------------------------------------------------------------------
 
-    def forward(self, req: OmniDiffusionRequest) -> DiffusionOutput:
+    def forward(self, req: DiffusionRequestBatch) -> DiffusionOutput:
         """Full delegation to diffusers ``pipeline.__call__()``."""
-
         kwargs = self._build_call_kwargs(req)
         logger.debug(f"Calling diffusers pipeline with kwargs: {kwargs}")
 
@@ -178,10 +216,38 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
                 "Eager execution is not supported with the diffusers backend. "
                 "Use a native pipeline for continuous batching mode."
             )
-        if self.od_config.quantization_config is not None:
-            raise NotImplementedError(
-                "Quantization is not supported with the diffusers backend. Use a native pipeline for quantization."
+        if (
+            self.od_config.quantization_config is not None
+            and "quantization_config" not in self.od_config.diffusers_load_kwargs
+        ):
+            ensure_supported_diffusers_quantization(self.od_config.quantization_config)
+            if self.od_config.diffusers_load_kwargs.get("dduf_file"):
+                raise NotImplementedError(
+                    "Diffusers backend quantization conversion does not support "
+                    "diffusers_load_kwargs.dduf_file yet. The preflight component "
+                    "discovery would need to mirror Diffusers' DDUF config loading. "
+                    "Use diffusers_load_kwargs.quantization_config for a native "
+                    "Diffusers quantization config, or omit dduf_file for vLLM-Omni "
+                    "quantization conversion."
+                )
+
+    def _load_diffusers_component_names(
+        self,
+        model_id: str,
+        load_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        config_load_kwargs = {k: load_kwargs[k] for k in _DIFFUSERS_CONFIG_LOAD_KWARGS if k in load_kwargs}
+        pipeline_config = DiffusionPipeline.load_config(model_id, **config_load_kwargs)
+        return {
+            name: value
+            for name, value in pipeline_config.items()
+            if (
+                isinstance(value, list)
+                and len(value) > 0
+                and value[0] is not None
+                and (name not in load_kwargs or load_kwargs[name] is not None)
             )
+        }
 
     # ------------------------------------------------------------------
     # Wrap settings, inputs, and outputs
@@ -198,7 +264,8 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
             logging.info("No transformer found in diffusers pipeline. Skipping attention backend setting.")
             return
 
-        attention_backend_config = self.od_config.attention_backend or os.environ.get("DIFFUSION_ATTENTION_BACKEND")
+        default_spec = self.od_config.diffusion_attention_config.default
+        attention_backend_config = default_spec.backend if default_spec is not None else None
         attention_backend_attempts: list[str] = []
         match attention_backend_config:
             case "FLASH_ATTN" | None:
@@ -267,33 +334,53 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
                 f"{dict(zip(attention_backend_attempts, attempt_errors))}"
             )
 
-    def _build_call_kwargs(self, req: OmniDiffusionRequest) -> dict[str, Any]:
-        """Translate ``OmniDiffusionRequest`` into diffusers ``__call__`` kwargs."""
+    def _build_call_kwargs(self, req: DiffusionRequestBatch) -> dict[str, Any]:
+        """Translate a ``DiffusionRequestBatch`` into diffusers ``__call__`` kwargs."""
         sampling = req.sampling_params
-        prompt, neg_prompt = self._extract_prompt(req.prompts)
+        input_kwargs = self._extract_input(req.prompts)
+
+        self._pipeline_utils.validate_runtime_sampling_params(sampling)
 
         # Merge user-provided call kwargs from stage/CLI defaults.
-        # Request-time parameters take precedence over stage-config defaults
-        call_kwargs = self.od_config.diffusers_call_kwargs
-        kwargs: dict[str, Any] = {
-            **call_kwargs,
-            "prompt": prompt,
-            "num_inference_steps": sampling.num_inference_steps,
-            "guidance_scale": sampling.guidance_scale,
-            "output_type": sampling.output_type or self.od_config.output_type,
-        }
+        # Load time defaults -> input kwargs (prompts, neg prompts, images...) -> request-time sampling params
+        kwargs: dict[str, Any] = {}
 
-        if sampling.height is not None:
-            kwargs["height"] = sampling.height
-        if sampling.width is not None:
-            kwargs["width"] = sampling.width
-        if sampling.num_frames is not None and sampling.num_frames > 1:
-            kwargs["num_frames"] = sampling.num_frames
-        if sampling.num_outputs_per_prompt is not None and sampling.num_outputs_per_prompt > 1:
-            kwargs["num_images_per_prompt"] = sampling.num_outputs_per_prompt
+        # Load time defaults
+        for key, value in self.od_config.diffusers_call_kwargs.items():
+            if self._accept_call_kwargs is None or key in self._accept_call_kwargs:
+                kwargs[key] = value
+            else:
+                logger.warning(
+                    f"Skipping unsupported diffusers pipeline __call__ argument `{key}` from "
+                    f"diffusers_call_kwargs. Check out the documentation of {self._pipeline.__class__.__name__}."
+                )
 
-        if neg_prompt is not None:
-            kwargs["negative_prompt"] = neg_prompt
+        # Input kwargs
+        for key, value in input_kwargs.items():
+            if self._accept_call_kwargs is None or key in self._accept_call_kwargs:
+                kwargs[key] = value
+            else:
+                logger.warning(
+                    f"Skipping unsupported diffusers pipeline __call__ argument `{key}` from prompt input."
+                    f"Check out the documentation of {self._pipeline.__class__.__name__}."
+                )
+
+        # Request-time sampling params
+        for key, value in sampling.__dict__.items():
+            if value is None:
+                continue
+            if self._accept_call_kwargs is None or key in self._accept_call_kwargs:
+                kwargs[key] = value
+
+        # Special format fields in sampling params
+        if output_type := sampling.output_type or self.od_config.output_type:
+            kwargs["output_type"] = output_type
+
+        if (num_outputs_per_prompt := sampling.num_outputs_per_prompt) > 0:
+            # In diffusers, they are num_images_per_prompt, num_videos_per_prompt, etc.
+            for key in self._accept_call_kwargs or ():
+                if re.match(r"num_[a-z]+_per_prompt", key):
+                    kwargs[key] = num_outputs_per_prompt
 
         if sampling.generator is not None:
             kwargs["generator"] = sampling.generator
@@ -302,38 +389,100 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
         else:
             kwargs["generator"] = torch.Generator(device=sampling.generator_device)
 
-        if sampling.latents is not None:
-            kwargs["latents"] = sampling.latents
+        logger.info(
+            "Calling diffusers pipeline with kwargs: %s", DiffusersAdapterPipeline._summarize_call_kwargs_value(kwargs)
+        )
 
         return kwargs
 
-    @staticmethod
-    def _extract_prompt(prompt_obj: list[OmniPromptType]) -> tuple[str | list[str], str | list[str] | None]:
+    def _extract_input(self, prompt_obj: list[OmniPromptType]) -> dict[str, Any]:
         """Extract the text prompts and negative prompts from a list of prompt objects."""
         if len(prompt_obj) == 1:
             if isinstance(prompt_obj[0], str):
-                return prompt_obj[0], None
+                return {"prompt": prompt_obj[0]}
             else:
-                return prompt_obj[0].get("prompt", ""), prompt_obj[0].get("negative_prompt", None)
+                obj = cast(OmniTextPrompt, prompt_obj[0])
+                negative_prompt = obj.get("negative_prompt")
+                multi_modal_data = obj.get("multi_modal_data") or {}
+                kwargs = {
+                    "prompt": obj.get("prompt", ""),
+                    **multi_modal_data,
+                }
+                if negative_prompt is not None:
+                    kwargs["negative_prompt"] = negative_prompt
+                return kwargs
 
-        prompts = []
-        negative_prompts: list[str] | None = []
-        for prompt in prompt_obj:
+        # Check the first element for the presence of multimodal data.
+        # The following elements should have the same multimodal data fields, or none has multimodal data.
+        multi_modal_data_fields: list[str] = []
+        if isinstance(prompt_obj[0], dict) and (multi_modal_data := prompt_obj[0].get("multi_modal_data")):
+            multi_modal_data_fields = list(multi_modal_data.keys())
+        if multi_modal_data_fields:
+            for i, prompt in enumerate(prompt_obj):
+                assert isinstance(prompt, dict) and (multi_modal_data := prompt.get("multi_modal_data")) is not None, (
+                    "When there are multiple prompts and the first prompt has multimodal data, "
+                    f"each prompt should also contain the same multimodal data fields, but prompt {i} does not."
+                )
+                for key in multi_modal_data_fields:
+                    assert key in multi_modal_data, (
+                        "When there are multiple prompts and the first prompt has multimodal data, each prompt should "
+                        f"also contain the same multimodal data fields, but prompt {i} does not contain {key}."
+                    )
+                    assert not isinstance(multi_modal_data.get(key), list), (
+                        f"When there are multiple prompts and each prompt has multiple {key} data, this input pattern "
+                        "is ambiguous as diffusers accepts flattened lists of text prompts and multimodal data. "
+                        f"To use multiple {key} data, please use one single prompt instead."
+                    )
+
+        input_kwargs = {"prompt": [], **{key: [] for key in multi_modal_data_fields}}
+
+        # Negative prompt rule:
+        # - If any OmniTextPrompt has a negative prompt, or diffusers_call_kwargs has `negative_prompt`,
+        #     enforce a negative prompt input (list[str]) -> `kwargs_should_contain_negative_prompt=true`
+        #     (Because the negative prompt must be str, list[str], or None. It cannot be list[str|None])
+        # -   Further in this case, try:
+        # -   1. negative prompt in this OmniTextPrompt (typed dict)
+        # -   2. fallback negative prompt from diffusers_call_kwargs (single str or the i-th item in list[str])
+        # -   3. empty string ""
+        # - Otherwise, `kwargs_should_contain_negative_prompt=False`. Do not add "negative_prompt" key to input_kwargs.
+        has_negative_prompt = any(isinstance(p, dict) and p.get("negative_prompt") is not None for p in prompt_obj)
+        fallback_negative_prompt = self.od_config.diffusers_call_kwargs.get("negative_prompt")
+        kwargs_should_contain_negative_prompt = has_negative_prompt or fallback_negative_prompt is not None
+        if kwargs_should_contain_negative_prompt:
+            input_kwargs["negative_prompt"] = []
+
+        for i, prompt in enumerate(prompt_obj):
+            this_fallback_negative_prompt = ""
+            if isinstance(fallback_negative_prompt, str):
+                this_fallback_negative_prompt = fallback_negative_prompt
+            elif isinstance(fallback_negative_prompt, list):
+                try:
+                    this_fallback_negative_prompt = fallback_negative_prompt[i]
+                except IndexError:
+                    raise ValueError(
+                        "The fallback negative_prompt in diffusers_call_kwargs is a list, but its length "
+                        f"({len(fallback_negative_prompt)}) is less than the number of prompts ({len(prompt_obj)}). "
+                        "Please provide a list with the same length as the number of prompts."
+                    )
+
             if isinstance(prompt, str):
-                prompts.append(prompt)
+                input_kwargs["prompt"].append(prompt)
+                if kwargs_should_contain_negative_prompt:
+                    input_kwargs["negative_prompt"].append(this_fallback_negative_prompt)
+                for key in multi_modal_data_fields:
+                    input_kwargs[key].append(None)
             else:
-                prompts.append(prompt.get("prompt", ""))
-                negative_prompts.append(prompt.get("negative_prompt", ""))
-        if all(not np for np in negative_prompts):
-            negative_prompts = None
-        return prompts, negative_prompts
+                obj = cast(OmniTextPrompt, prompt)
+                input_kwargs["prompt"].append(obj.get("prompt", ""))
 
-    @staticmethod
-    def _extract_negative_prompt(prompt_obj: Any) -> str | None:
-        """Extract the negative prompt from a prompt object, if present."""
-        if isinstance(prompt_obj, dict):
-            return prompt_obj.get("negative_prompt")
-        return getattr(prompt_obj, "negative_prompt", None)
+                if kwargs_should_contain_negative_prompt:
+                    negative_prompt: str = obj.get("negative_prompt", this_fallback_negative_prompt)
+                    input_kwargs["negative_prompt"].append(negative_prompt)
+
+                multi_modal_data = obj.get("multi_modal_data") or {}
+                for key in multi_modal_data_fields:
+                    input_kwargs[key].append(multi_modal_data.get(key))
+        return input_kwargs
 
     def _wrap_output(self, output: Any) -> DiffusionOutput:
         """Convert diffusers pipeline output to ``DiffusionOutput``.
@@ -356,3 +505,30 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
             return DiffusionOutput(output=output.audios)
 
         return DiffusionOutput(output=output)
+
+    @staticmethod
+    def _summarize_call_kwargs_value(value: Any) -> Any:
+        """Return a sanitized summary of diffusers call kwargs for logging."""
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            if len(value) < 20:
+                return value
+            return f"{value[:10]}...{value[-10:]}"
+        if isinstance(value, torch.Tensor):
+            return f"Tensor with shape {tuple(value.shape)}, dtype {value.dtype}, device {value.device}"
+        if isinstance(value, torch.Generator):
+            return f"Generator with seed {value.initial_seed()} on device {value.device}"
+        if isinstance(value, dict):
+            return {k: DiffusersAdapterPipeline._summarize_call_kwargs_value(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            if len(value) > 10:
+                return f"{value.__class__.__name__} of length {len(value)}"
+            return value.__class__([DiffusersAdapterPipeline._summarize_call_kwargs_value(v) for v in value])
+        shape = getattr(value, "shape", None)
+        size = getattr(value, "size", None)
+        if shape is not None:
+            return {"type": type(value).__name__, "shape": tuple(shape)}
+        if size is not None and not callable(size):
+            return {"type": type(value).__name__, "size": size}
+        return f"<{type(value).__name__}>"

@@ -17,6 +17,9 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091
 
 The default deployment configuration situated at `vllm_omni/deploy/qwen3_omni_moe.yaml` is resolved and loaded
 automatically via the model registry, obviating the necessity for the `--deploy-config` flag in standard deployment topologies.
+The bundled Qwen3-Omni setup defaults `VLLM_USE_FLASHINFER_MOE_FP16=0`. This keeps the Thinker & Talker on vLLM's
+Triton unquantized MoE path and avoids the performance regression observed with the FlashInfer CUTLASS unquantized MoE
+backend.
 Asynchronous chunk streaming is **enabled by default** within the bundled configuration.
 
 To explicitly utilize a custom deployment YAML, specify the configuration path:
@@ -28,11 +31,13 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 \
 ### Launch individual stages (stage-based CLI)
 
 Adopt the stage-based CLI architecture to independently instantiate execution processes per functional stage.
+The example below pins Stage 0 to GPU 0 and Stage 1/2 to GPU 1 via
+`CUDA_VISIBLE_DEVICES`.
 
 **1. Stage 0 (Thinker + API server)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --port 8091 \
     --stage-id 0 \
     --omni-master-address 127.0.0.1 \
@@ -42,7 +47,7 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
 **2. Stage 1 (Talker)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --omni-master-address 127.0.0.1 \
@@ -52,7 +57,7 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
 **3. Stage 2 (Code2Wav)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 2 \
     --headless \
     --omni-master-address 127.0.0.1 \
@@ -70,12 +75,18 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 \
     --stage-overrides '{"1": {"gpu_memory_utilization": 0.5}}'
 ```
 
+To experiment with the FlashInfer FP16 MoE path, set `VLLM_USE_FLASHINFER_MOE_FP16=1` before launching the server:
+```bash
+VLLM_USE_FLASHINFER_MOE_FP16=1 \
+vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091
+```
+
 For the stage-based CLI, you usually do **not** need `--stage-overrides` for
 that kind of change. Since each command launches one stage, just pass the knob
 directly on that stage command:
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --gpu-memory-utilization 0.5 \

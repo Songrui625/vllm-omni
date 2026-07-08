@@ -102,15 +102,17 @@ The stage-based CLI paradigm facilitates the execution of discrete pipeline stag
 
 For migrated architectures, the system automatically resolves and loads the bundled deployment YAML. Consequently, the primary execution path
 does **not** necessitate the explicit definition of `--deploy-config`:
+the example below uses `CUDA_VISIBLE_DEVICES=0` for Stage 0 and
+`CUDA_VISIBLE_DEVICES=1` for Stage 1.
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --port 8091 \
     --stage-id 0 \
     --omni-master-address 127.0.0.1 \
     --omni-master-port 26000
 
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --omni-master-address 127.0.0.1 \
@@ -132,7 +134,7 @@ Conversely, in the context of the **stage-based CLI** paradigm, given that each 
 can be defined uniformly via explicit CLI flags on the corresponding instantiation command, rendering composite `--stage-overrides` JSON strings unnecessary:
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --gpu-memory-utilization 0.5 \
@@ -189,7 +191,7 @@ Within the stage-based CLI paradigm, equivalent configuration parameters can inh
 as command-line arguments to the designated single-stage process instantiation:
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 0 \
     --max-num-seqs 8 \
     --omni-master-address 127.0.0.1 \
@@ -288,7 +290,6 @@ stage_args:
       enable_prefix_caching: false
       engine_output_type: latent
     engine_input_source: [0]
-    custom_process_input_func: vllm_omni.model_executor.stage_input_processors.qwen2_5_omni.thinker2talker
     default_sampling_params:
       temperature: 0.9
       top_p: 0.8
@@ -376,6 +377,20 @@ Default: `"0"`
 The maximum number of sequences for concurrent processing in this stage. For LLM stages, this controls the vLLM scheduler's maximum concurrent sequences. For all stage types, this also controls how many tasks can be batched together in the task processing loop.
 
 Default: `1`
+
+#### `engine_args.request_batch_max_wait_ms`
+
+The maximum time, in milliseconds, that a diffusion request-mode stage may wait
+before the first `schedule()` of a new scheduler wave so compatible requests can
+accumulate for request-level batching. This only applies to diffusion pipelines
+that support request-level batching with `step_execution` disabled.
+
+Use this together with `max_num_seqs > 1` for bursty serving traffic. `0`
+disables admission waiting and preserves the lowest first-request latency.
+For diffusion request-level batching tuning, see
+[Request-Level Batching](../user_guide/diffusion/request_batching.md).
+
+Default: `0.0`
 
 ### `engine_args`
 

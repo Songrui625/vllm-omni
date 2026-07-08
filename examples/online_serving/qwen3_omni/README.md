@@ -18,24 +18,33 @@ Asynchronous chunk streaming operates as **enabled by default** within this bund
 Additionally, NPU, ROCm, and XPU per-platform configuration deltas are deterministically merged from the
 `platforms`: section of the corresponding YAML.
 
-**Note:** The OpenAI-style **`/v1/realtime`** WebSocket interface (facilitating streaming PCM audio input alongside audio and transcription output)
-is currently **unsupported** while the `async_chunk` configuration attribute is enabled.
-It is requisite to instantiate the default omni architecture or utilize a deployment configuration specifying `async_chunk: false` to facilitate real-time streaming sessions.
-
 To explicitly utilize a custom deployment YAML, mandate the configuration path accordingly:
 ```bash
 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 \
     --deploy-config /path/to/your_deploy_config.yaml
 ```
 
+For a 3x-GPU multi-replica layout (talker/code2wav scale-out on cuda:1,2),
+use `--stage-overrides` on top of the default config:
+
+```bash
+vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 \
+    --stage-overrides '{
+        "1": {"num_replicas": 2, "devices": "1,2"},
+        "2": {"num_replicas": 2, "devices": "1,2"}
+    }'
+```
+
 ### Launch individual stages (stage-based CLI)
 
 Use the stage-based CLI when you want to run one stage per process.
+The example below pins Stage 0 to GPU 0 and Stage 1/2 to GPU 1 via
+`CUDA_VISIBLE_DEVICES`.
 
 **1. Stage 0 (Thinker + API server)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --port 8091 \
     --stage-id 0 \
     --omni-master-address 127.0.0.1 \
@@ -45,7 +54,7 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
 **2. Stage 1 (Talker)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --omni-master-address 127.0.0.1 \
@@ -55,7 +64,7 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
 **3. Stage 2 (Code2Wav)**
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 2 \
     --headless \
     --omni-master-address 127.0.0.1 \
@@ -78,7 +87,7 @@ for this category of optimization. Given that each instantiation strictly initia
 parameter flags can be systematically assigned directly onto that specific stage's command sequence:
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
+CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni \
     --stage-id 1 \
     --headless \
     --gpu-memory-utilization 0.5 \
@@ -120,8 +129,9 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 \
     --no-async-chunk
 ```
 
-For the TTS counterpart (synchronous codec variant), see
-[qwen3_tts README](../qwen3_tts/README.md#sync-vs-async-chunk-mode).
+For the TTS counterpart (synchronous codec variant), see the Qwen3-TTS
+section of the online TTS hub:
+[examples/online_serving/text_to_speech/README.md#qwen3-tts](../text_to_speech/README.md#qwen3-tts).
 
 Explicit CLI flags **override** the deploy YAML (which itself overrides the
 parser defaults). If you don't pass a flag, the YAML value wins.
@@ -278,7 +288,7 @@ python openai_realtime_client.py \
 | `--num-requests` | `1` | Number of sequential sessions (see `--concurrency`) |
 | `--concurrency` | `1` | Max concurrent WebSocket sessions when `--num-requests` > 1 |
 
-Ensure the server is running **without** `async_chunk` if you use `/v1/realtime`, for example:
+Ensure the server is running, for example:
 
 ```bash
 vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091

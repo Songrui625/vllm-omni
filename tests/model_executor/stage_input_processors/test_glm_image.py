@@ -32,11 +32,6 @@ def _source_output(token_ids: list[int], mm_output: dict | None = None):
     )
 
 
-def _stage_with_outputs(outputs):
-    """Create a stage list entry with engine_outputs."""
-    return SimpleNamespace(engine_outputs=outputs)
-
-
 # =============================================================================
 # Tests for _has_source_image
 # =============================================================================
@@ -285,22 +280,21 @@ class TestAr2Diffusion:
         """Test basic text-to-image pipeline: AR -> Diffusion."""
         # 1024x1024 t2i: small(256) + large(1024) + EOS
         token_ids = list(range(256)) + list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(token_ids)])]
+        source_outputs = [_source_output(token_ids)]
 
         prompt = {"prompt": "a cat", "mm_processor_kwargs": {"target_h": 1024, "target_w": 1024}}
 
-        result = ar2diffusion(stage_list, [0], prompt=[prompt])
-        assert len(result) == 1
-        assert result[0]["prompt"] == "a cat"
-        assert result[0]["height"] == 1024
-        assert result[0]["width"] == 1024
-        assert "prior_token_ids" in result[0]["extra"]
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["prompt"] == "a cat"
+        assert result["height"] == 1024
+        assert result["width"] == 1024
+        assert "prior_token_ids" in result["extra"]
 
     def test_i2i_with_mm_output(self):
         """Test image-to-image with prior_token_image_ids from AR model."""
         token_ids = list(range(1024)) + [16385]
         mm_output = {"ids": {"prior_image": torch.tensor([1, 2, 3])}}
-        stage_list = [_stage_with_outputs([_source_output(token_ids, mm_output)])]
+        source_outputs = [_source_output(token_ids, mm_output)]
 
         from PIL import Image
 
@@ -311,14 +305,13 @@ class TestAr2Diffusion:
             "multi_modal_data": {"image": img},
         }
 
-        result = ar2diffusion(stage_list, [0], prompt=[prompt])
-        assert len(result) == 1
-        assert result[0]["extra"]["prior_token_image_ids"] is not None
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["extra"]["prior_token_image_ids"] is not None
 
     def test_i2i_detected_via_modalities(self):
         """Test i2i mode detected via modalities field."""
         token_ids = list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(token_ids)])]
+        source_outputs = [_source_output(token_ids)]
 
         prompt = {
             "prompt": "edit this",
@@ -326,35 +319,26 @@ class TestAr2Diffusion:
             "modalities": ["img2img"],
         }
 
-        result = ar2diffusion(stage_list, [0], prompt=[prompt])
-        assert len(result) == 1
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["prompt"] == "edit this"
 
-    def test_empty_engine_input_source_raises(self):
-        with pytest.raises(ValueError, match="engine_input_source cannot be empty"):
-            ar2diffusion([], [], prompt={})
-
-    def test_invalid_stage_id_raises(self):
-        with pytest.raises(IndexError, match="Invalid stage_id"):
-            ar2diffusion([_stage_with_outputs(None)], [5], prompt={})
-
-    def test_no_outputs_raises(self):
-        with pytest.raises(RuntimeError, match="has no outputs yet"):
-            ar2diffusion([SimpleNamespace(engine_outputs=None)], [0], prompt={})
+    def test_empty_source_outputs_returns_none(self):
+        assert ar2diffusion([], prompt=None) is None
 
     def test_default_dimensions(self):
         """When no height/width in prompt, defaults to 1024x1024."""
         token_ids = list(range(256)) + list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(token_ids)])]
+        source_outputs = [_source_output(token_ids)]
 
         prompt = {"prompt": "test"}
-        result = ar2diffusion(stage_list, [0], prompt=[prompt])
-        assert result[0]["height"] == 1024
-        assert result[0]["width"] == 1024
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["height"] == 1024
+        assert result["width"] == 1024
 
     def test_requires_multimodal_data_with_pil_image(self):
         """Test that pil_image is included when requires_multimodal_data=True."""
         token_ids = list(range(256)) + list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(token_ids)])]
+        source_outputs = [_source_output(token_ids)]
 
         from PIL import Image
 
@@ -364,13 +348,13 @@ class TestAr2Diffusion:
             "multi_modal_data": {"image": img},
         }
 
-        result = ar2diffusion(stage_list, [0], prompt=[prompt], requires_multimodal_data=True)
-        assert result[0]["pil_image"] is img
+        result = ar2diffusion(source_outputs, prompt=prompt, requires_multimodal_data=True)
+        assert result["pil_image"] is img
 
     def test_extra_params_passed_through(self):
         """Test that seed, num_inference_steps, guidance_scale, negative_prompt are passed."""
         token_ids = list(range(256)) + list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(token_ids)])]
+        source_outputs = [_source_output(token_ids)]
 
         prompt = {
             "prompt": "test",
@@ -380,24 +364,22 @@ class TestAr2Diffusion:
             "negative_prompt": "blurry",
         }
 
-        result = ar2diffusion(stage_list, [0], prompt=[prompt])
-        assert result[0]["seed"] == 42
-        assert result[0]["num_inference_steps"] == 50
-        assert result[0]["guidance_scale"] == 7.5
-        assert result[0]["negative_prompt"] == "blurry"
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["prompt"] == "test"
+        assert result["seed"] == 42
+        assert result["num_inference_steps"] == 50
+        assert result["guidance_scale"] == 7.5
+        assert result["negative_prompt"] == "blurry"
 
-    def test_batch_requests(self):
-        """Test processing multiple requests in a batch."""
+    def test_multiple_source_outputs_uses_first_payload_only(self):
+        """Test the GLM bridge keeps a single diffusion payload for one request."""
         tokens1 = list(range(256)) + list(range(1024)) + [16385]
-        tokens2 = list(range(256)) + list(range(1024)) + [16385]
-        stage_list = [_stage_with_outputs([_source_output(tokens1), _source_output(tokens2)])]
+        tokens2 = [1, 2, 3]
+        source_outputs = [_source_output(tokens1), _source_output(tokens2)]
 
-        prompts = [
-            {"prompt": "first", "mm_processor_kwargs": {"target_h": 1024, "target_w": 1024}},
-            {"prompt": "second", "mm_processor_kwargs": {"target_h": 512, "target_w": 512}},
-        ]
+        prompt = {"prompt": "first", "mm_processor_kwargs": {"target_h": 1024, "target_w": 1024}}
 
-        result = ar2diffusion(stage_list, [0], prompt=prompts)
-        assert len(result) == 2
-        assert result[0]["prompt"] == "first"
-        assert result[1]["prompt"] == "second"
+        result = ar2diffusion(source_outputs, prompt=prompt)
+        assert result["prompt"] == "first"
+        assert result["height"] == 1024
+        assert result["width"] == 1024
