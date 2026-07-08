@@ -3,10 +3,15 @@ from collections import defaultdict
 import pytest
 import torch
 import torch.nn as nn
+from diffusers.loaders.lora_conversion_utils import (
+    _convert_non_diffusers_qwen_lora_to_diffusers,
+)
+from pytest_mock import MockerFixture
 from torch.testing import assert_close
 
 from vllm_omni.diffusion.lora.loader import (
     LoraLoaderMixin,
+    QwenImageLoraLoaderMixin,
     _prepare_lora_delta,
     _remap_state_dict_keys,
 )
@@ -14,6 +19,8 @@ from vllm_omni.diffusion.lora.loader import (
 HEAD_DIM = 24
 RANK = 2
 NUM_LAYERS = 10
+
+pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 
 class DummyTransformerBlock(nn.Module):
@@ -311,3 +318,58 @@ class TestLoraLoaderMixin:
 
         # validate the weights are restored
         assert_params_equal(pipeline.transformer, original_params)
+
+
+# ======================================================
+# Test QwenImageLoraLoaderMixin
+# ======================================================
+class DummyQwenImagePipeline(nn.Module, QwenImageLoraLoaderMixin):
+    def __init__(self, num_layers: int, d_model: int, bias: bool = False):
+        super().__init__()
+        self.transformer = DummyTransformer(num_layers, d_model, bias=bias, stacked_params=True)
+
+
+class TestQwenImageLoraLoaderMixin:
+    def test_load_lora_weights(self, mocker: MockerFixture):
+        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
+        original_params = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+        assert len(lora_state_dict) > 0
+
+        mocker.patch(
+            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
+            return_value=_convert_non_diffusers_qwen_lora_to_diffusers,
+        )
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+
+        # validate the weights are updated after lora loaded
+        assert_params_not_equal(pipeline.transformer, original_params)
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+    def test_unload_lora_weights(self, mocker: MockerFixture):
+        pipeline = DummyQwenImagePipeline(NUM_LAYERS, HEAD_DIM)
+        original_params = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+
+        lora_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+        assert len(lora_state_dict) > 0
+
+        mocker.patch(
+            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
+            return_value=_convert_non_diffusers_qwen_lora_to_diffusers,
+        )
+        pipeline.load_lora_weights(lora_state_dict, "adapter0")
+        # validate the weights are updated after lora loaded
+        assert_params_not_equal(pipeline.transformer, original_params)
+
+        # validate lora_loaded map is updated after lora loaded
+        assert "adapter0" in pipeline.lora_loaded
+
+        pipeline.unload_lora_weights("adapter0")
+        # validate the weights are restored after lora unloaded
+        assert_params_equal(pipeline.transformer, original_params)
+
+        # validate lora_loaded map is updated
+        assert "adapter0" not in pipeline.lora_loaded
