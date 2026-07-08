@@ -1288,7 +1288,7 @@ class LTX2TwoStagesPipeline(nn.Module, SupportsModuleOffload):
             stage_2_req = copy.copy(req)
             stage_2_req.sampling_params = req.sampling_params.clone()
             stage_2_req.sampling_params.num_inference_steps = 3
-            stage_2_req.guidance_scale = 1.0
+            stage_2_req.sampling_params.guidance_scale = 1.0
 
             video, audio = self.pipe(
                 req=stage_2_req,
