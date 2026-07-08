@@ -224,7 +224,11 @@ class DiffusionWorker:
         elif lora_backend == LoRABackend.DISTILL:
             pipeline = self.model_runner.pipeline
             if hasattr(pipeline, "load_lora_weights"):
+                if self.od_config.lora_scale > 1.0:
+                    logger.warning("lora_scale > 1.0 may not take any effect when using distilled LoRA backend.")
                 pipeline.load_lora_weights(self.od_config.lora_path)
+            else:
+                logger.warning("Pipeline does not support loading distilled LoRA weights for now.")
         else:
             raise ValueError(f"Unknown LoRA backend: {lora_backend}. Available choices: {LoRABackend.__members__}")
 
