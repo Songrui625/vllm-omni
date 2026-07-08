@@ -1,0 +1,16 @@
+vllm_omni/diffusion/worker/diffusion_worker.py
+  h_5d66c6d0c5eeb9 228,231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "33e551e504efca95a50ec79f67e2d4e4b72152c8",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
