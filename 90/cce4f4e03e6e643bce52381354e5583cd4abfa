@@ -1,0 +1,26 @@
+vllm_omni/diffusion/lora/loader.py
+  s_8d3c688d24cac7::t_adc7065262c448 480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "90cce4f4e03e6e643bce52381354e5583cd4abfa",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_8d3c688d24cac7": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-4b75bda9-f20b-43c1-bde9-9f70bbd13e51",
+        "model": "default"
+      },
+      "human_author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
