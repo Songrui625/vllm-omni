@@ -1,0 +1,16 @@
+vllm_omni/diffusion/models/ltx2/pipeline_ltx2.py
+  h_5d66c6d0c5eeb9 1291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c256130a3168775dd6c8d31dc3f81a303fac4333",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
