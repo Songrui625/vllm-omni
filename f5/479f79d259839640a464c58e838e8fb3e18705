@@ -1,0 +1,16 @@
+docs/user_guide/diffusion/lora.md
+  h_5d66c6d0c5eeb9 141,150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f5479f79d259839640a464c58e838e8fb3e18705",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
