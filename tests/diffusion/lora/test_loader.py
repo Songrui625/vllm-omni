@@ -12,6 +12,7 @@ from torch.testing import assert_close
 from vllm_omni.diffusion.lora.loader import (
     LoraLoaderMixin,
     QwenImageLoraLoaderMixin,
+    WanLoraLoaderMixin,
     _prepare_lora_delta,
     _remap_state_dict_keys,
 )
@@ -373,3 +374,39 @@ class TestQwenImageLoraLoaderMixin:
 
         # validate lora_loaded map is updated
         assert "adapter0" not in pipeline.lora_loaded
+
+
+# ======================================================
+# Test WanLoraLoaderMixin
+# ======================================================
+class DummyWanPipeline(nn.Module, WanLoraLoaderMixin):
+    def __init__(self, num_layers: int, d_model: int):
+        super().__init__()
+        self.has_transformer_2 = True
+        self.transformer = DummyTransformer(num_layers, d_model, stacked_params=True)
+        self.transformer_2 = DummyTransformer(num_layers, d_model, stacked_params=True)
+
+
+def test_wan_load_lora_weights_targets_both_transformers(mocker: MockerFixture):
+    pipeline = DummyWanPipeline(NUM_LAYERS, HEAD_DIM)
+    original_high = {name: param.clone() for name, param in pipeline.transformer.named_parameters()}
+    original_low = {name: param.clone() for name, param in pipeline.transformer_2.named_parameters()}
+    high_state_dict = make_lora_state_dict_for_module(pipeline.transformer)
+    low_state_dict = make_lora_state_dict_for_module(pipeline.transformer_2)
+
+    mocker.patch(
+        "vllm_omni.diffusion.lora.loader._load_lora_state_dict",
+        side_effect=[high_state_dict, low_state_dict],
+    )
+
+    pipeline.load_lora_weights(["high.safetensors", "low.safetensors"], "adapter0")
+
+    assert_params_not_equal(pipeline.transformer, original_high)
+    assert_params_not_equal(pipeline.transformer_2, original_low)
+    assert set(pipeline.lora_loaded["adapter0"]) == {"transformer", "transformer_2"}
+
+    pipeline.unload_lora_weights("adapter0")
+
+    assert_params_equal(pipeline.transformer, original_high)
+    assert_params_equal(pipeline.transformer_2, original_low)
+    assert "adapter0" not in pipeline.lora_loaded

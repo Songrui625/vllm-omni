@@ -477,7 +477,7 @@ class WanLoraLoaderMixin(LoraLoaderMixin):
                 ],
             )
 
-            module = find_module_with_attr(self, target_module_name)
+            module = get_transformer_from_pipeline(self, transformer_name=target_module_name)
             if module is None:
                 logger.warning(
                     f"Skip LoRA {lora_path}: target module '{target_module_name}' "
@@ -497,7 +497,7 @@ class WanLoraLoaderMixin(LoraLoaderMixin):
 
         module_to_lora_sd = self.lora_loaded[adapter_name]
         for module_name, lora_sd in module_to_lora_sd.items():
-            module = getattr(find_module_with_attr(self, module_name), module_name)
+            module = get_transformer_from_pipeline(self, transformer_name=module_name)
             self.unload_module_lora(lora_sd, module, prefix=self.transformer_name)
 
         del self.lora_loaded[adapter_name]
