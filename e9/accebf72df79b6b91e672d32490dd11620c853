@@ -1,0 +1,29 @@
+vllm_omni/config/omni_config.py
+  s_fab7cb71fe580f::t_fd19cda8adc476 452,454
+vllm_omni/config/stage_config.py
+  s_fab7cb71fe580f::t_2500128b881eda 366-368
+vllm_omni/engine/arg_utils.py
+  s_fab7cb71fe580f::t_6a1dee8aa9d528 455-457
+vllm_omni/engine/async_omni_engine.py
+  s_fab7cb71fe580f::t_acab2d48e9d371 1018-1020
+vllm_omni/entrypoints/cli/serve.py
+  s_fab7cb71fe580f::t_fa3006adca0425 154-160,423-448
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e9accebf72df79b6b91e672d32490dd11620c853",
+  "prompts": {},
+  "sessions": {
+    "s_fab7cb71fe580f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4084-c1d1-7590-9aae-b49c24ef2f3f",
+        "model": "unknown"
+      },
+      "human_author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
