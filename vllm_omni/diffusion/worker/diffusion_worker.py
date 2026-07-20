@@ -379,6 +379,10 @@ class DiffusionWorker:
         if self.model_runner.pipeline is None:
             return
 
+        lora_path = self.od_config.lora_path
+        if isinstance(lora_path, list) and len(lora_path) == 1:
+            lora_path = lora_path[0]
+
         lora_backend = self.od_config.lora_backend
         if lora_backend == LoRABackend.PEFT:
             self.lora_manager = DiffusionLoRAManager(
@@ -386,7 +390,7 @@ class DiffusionWorker:
                 device=self.device,
                 dtype=self.od_config.dtype,
                 max_cached_adapters=self.od_config.max_cpu_loras,
-                lora_path=self.od_config.lora_path,
+                lora_path=lora_path,
                 lora_scale=self.od_config.lora_scale,
             )
         elif lora_backend == LoRABackend.DISTILL:
@@ -394,7 +398,7 @@ class DiffusionWorker:
             if hasattr(pipeline, "load_lora_weights"):
                 if self.od_config.lora_scale > 1.0:
                     logger.warning("lora_scale > 1.0 may not take any effect when using distilled LoRA backend.")
-                pipeline.load_lora_weights(self.od_config.lora_path)
+                pipeline.load_lora_weights(lora_path)
             else:
                 logger.warning("Pipeline does not support loading distilled LoRA weights for now.")
         else:
