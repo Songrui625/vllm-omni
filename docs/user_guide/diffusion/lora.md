@@ -115,6 +115,44 @@ python examples/offline_inference/text_to_video/text_to_video.py \
   --prompt "A cat playing with yarn"
 ```
 
+##### Online serving
+
+Distilled LoRAs can also be fused when an online diffusion server starts. The
+adapter remains active for the lifetime of that server, so requests do not pass
+a per-request `lora` field.
+
+```bash
+vllm serve Qwen/Qwen-Image-2512 \
+  --omni \
+  --port 8091 \
+  --lora-backend distill \
+  --lora-path /path/to/Qwen-Image-2512-Lightning-4steps.safetensors
+```
+
+Then send a normal generation request with the sampling settings expected by
+the distilled checkpoint:
+
+```bash
+curl -s http://localhost:8091/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen-Image-2512",
+    "messages": [
+      {"role": "user", "content": "A piece of cheesecake"}
+    ],
+    "extra_body": {
+      "height": 1024,
+      "width": 1024,
+      "num_inference_steps": 4,
+      "true_cfg_scale": 1.0,
+      "seed": 42
+    }
+  }'
+```
+
+For Wan2.2 MoE serving, pass the high-noise checkpoint first and the low-noise
+checkpoint second to `--lora-path`.
+
 !!! note "Server-side Path Requirement"
     The LoRA adapter path (`local_path`) must be readable on the **server** machine. If your client and server are on different machines, ensure the LoRA adapter is accessible via a shared mount or copied to the server.
 
