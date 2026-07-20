@@ -1,0 +1,14 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7aefff0c809f9ee034fa9381dd1847c3b6b30358",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
