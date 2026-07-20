@@ -231,7 +231,7 @@ python text_to_video.py \
 - `--frame-rate`: generation FPS for pipelines that require it (e.g., LTX2).
 - `--audio-sample-rate`: audio sample rate for embedded audio (when the
   pipeline returns audio; LTX-2.3 outputs 48kHz audio).
-- `--quantization`: quantization method (`fp8` for FP8, `gguf` for GGUF).
+- `--quantization`: quantization method (such as `fp8` for FP8).
 - `--flow-shift`: scheduler flow_shift parameter.
 - `--lora-path`: path to PEFT LoRA adapter folder or checkpoint file.
 - `--lora-scale`: scale factor for LoRA weights.
