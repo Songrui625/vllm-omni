@@ -1,0 +1,30 @@
+tests/diffusion/lora/test_loader.py
+  s_fab7cb71fe580f::t_ed3d9b7c369ec2 15,377-412
+vllm_omni/diffusion/lora/loader.py
+  s_fab7cb71fe580f::t_611f4d9d3c22dd 480,500
+vllm_omni/diffusion/utils/tf_utils.py
+  s_fab7cb71fe580f::t_263b3769c4f461 73-75,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "05cc5a005adb9ee8073037bb85b409a3bf954a5a",
+  "prompts": {},
+  "humans": {
+    "h_5d66c6d0c5eeb9": {
+      "author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_fab7cb71fe580f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4084-c1d1-7590-9aae-b49c24ef2f3f",
+        "model": "unknown"
+      },
+      "human_author": "Songrui625 <songrui625@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
