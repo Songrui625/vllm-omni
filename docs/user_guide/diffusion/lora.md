@@ -138,7 +138,7 @@ curl -s http://localhost:8091/v1/chat/completions \
   -d '{
     "model": "Qwen/Qwen-Image-2512",
     "messages": [
-      {"role": "user", "content": "A piece of cheesecake"}
+      {"role": "user", "content": "A Chinese female college student, around 20 years old, with a very short haircut that conveys a gentle, artistic vibe. Her hair naturally falls to partially cover her cheeks, projecting a tomboyish yet charming demeanor. She has cool-toned fair skin and delicate features, with a slightly shy yet subtly confident expression—her mouth crooked in a playful, youthful smirk. She wears an off-shoulder top, revealing one shoulder, with a well-proportioned figure. The image is framed as a close-up selfie: she dominates the foreground, while the background clearly shows her dormitory—a neatly made bed with white linens on the top bunk, a tidy study desk with organized stationery, and wooden cabinets and drawers. The photo is captured on a smartphone under soft, even ambient lighting, with natural tones, high clarity, and a bright, lively atmosphere full of youthful, everyday energy."}
     ],
     "extra_body": {
       "height": 1024,
@@ -147,7 +147,7 @@ curl -s http://localhost:8091/v1/chat/completions \
       "true_cfg_scale": 1.0,
       "seed": 42
     }
-  }'
+  }' | jq -r '.choices[0].message.content[0].image_url.url' | cut -d',' -f2 | base64 -d > qwen_image_distill_lora_output.png
 ```
 
 For Wan2.2 MoE serving, pass the high-noise checkpoint first and the low-noise
