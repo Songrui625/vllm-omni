@@ -18,6 +18,7 @@ logger = init_logger(__name__)
 
 lora_convert_mapping: dict[str, Callable] = {
     "LTX2Pipeline": _convert_non_diffusers_ltx2_lora_to_diffusers,
+    "LTX2TwoStagesPipeline": _convert_non_diffusers_ltx2_lora_to_diffusers,
     "QwenImagePipeline": _convert_non_diffusers_qwen_lora_to_diffusers,
     "QwenImageEditPipeline": _convert_non_diffusers_qwen_lora_to_diffusers,
     "QwenImageEditPlusPipeline": _convert_non_diffusers_qwen_lora_to_diffusers,
@@ -27,7 +28,11 @@ lora_convert_mapping: dict[str, Callable] = {
 
 
 def get_converter_by_pipeline(pipeline):
-    return lora_convert_mapping.get(pipeline.__class__.__name__, None)
+    for pipeline_cls in pipeline.__class__.__mro__:
+        converter = lora_convert_mapping.get(pipeline_cls.__name__)
+        if converter is not None:
+            return converter
+    return None
 
 
 def _prepare_lora_delta(
