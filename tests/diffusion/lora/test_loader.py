@@ -375,6 +375,32 @@ class TestQwenImageLoraLoaderMixin:
         # validate lora_loaded map is updated
         assert "adapter0" not in pipeline.lora_loaded
 
+    def test_load_diffusers_lora_applies_non_unit_alpha(self, mocker: MockerFixture):
+        pipeline = DummyQwenImagePipeline(1, HEAD_DIM)
+        to_out = pipeline.transformer.blocks[0].attn.to_out
+        original_weight = to_out.weight.detach().clone()
+        base_key = "blocks.0.attn.to_out.0"
+        lora_a = torch.randn(RANK, HEAD_DIM)
+        lora_b = torch.randn(HEAD_DIM, RANK)
+        alpha = torch.tensor(6.0)
+        state_dict = {
+            f"{base_key}.lora_A.weight": lora_a,
+            f"{base_key}.lora_B.weight": lora_b,
+            f"{base_key}.alpha": alpha,
+        }
+        mocker.patch(
+            "vllm_omni.diffusion.lora.loader.get_converter_by_pipeline",
+            return_value=_convert_non_diffusers_qwen_lora_to_diffusers,
+        )
+
+        pipeline.load_lora_weights(state_dict, "adapter0")
+
+        expected_weight = original_weight + (lora_b @ lora_a) * (alpha.item() / RANK)
+        assert_close(to_out.weight, expected_weight)
+
+        pipeline.unload_lora_weights("adapter0")
+        assert_close(to_out.weight, original_weight)
+
 
 # ======================================================
 # Test WanLoraLoaderMixin

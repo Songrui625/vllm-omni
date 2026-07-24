@@ -181,6 +181,25 @@ def _remap_state_dict_keys(sd, rules):
     return new_sd
 
 
+def _apply_diffusers_lora_alpha_scaling(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Fold Diffusers-format LoRA alpha values into their B matrices."""
+    scaled_state_dict = dict(state_dict)
+    for alpha_key in (key for key in state_dict if key.endswith(".alpha")):
+        base_key = alpha_key[: -len(".alpha")]
+        lora_a_key = f"{base_key}.lora_A.weight"
+        lora_b_key = f"{base_key}.lora_B.weight"
+        if lora_a_key not in state_dict or lora_b_key not in state_dict:
+            raise ValueError(f"LoRA alpha key {alpha_key!r} does not have matching lora_A and lora_B weights.")
+
+        rank = state_dict[lora_a_key].shape[0]
+        alpha = state_dict[alpha_key]
+
+        scaled_state_dict[lora_b_key] = state_dict[lora_b_key] * (alpha.item() / rank)
+        scaled_state_dict.pop(alpha_key)
+
+    return scaled_state_dict
+
+
 class LoraLoaderMixin:
     transformer_name = "transformer"
 
@@ -322,6 +341,10 @@ class QwenImageLoraLoaderMixin(LoraLoaderMixin):
 
         has_alpha = any(k.endswith(".alpha") for k in state_dict)
         is_non_diffusers_format = any(k.startswith("diffusion_model.") for k in state_dict)
+        is_diffusers_lora_format = any(k.endswith(".lora_A.weight") for k in state_dict)
+        if has_alpha and is_diffusers_lora_format:
+            state_dict = _apply_diffusers_lora_alpha_scaling(state_dict)
+
         if has_alpha or is_non_diffusers_format:
             converter = get_converter_by_pipeline(self)
             if converter is None:
