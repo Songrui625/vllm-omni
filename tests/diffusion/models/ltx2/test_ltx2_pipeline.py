@@ -318,6 +318,7 @@ def test_ltx2_two_stage_reuses_prompt_context_between_phases():
     pipeline = object.__new__(LTX2TwoStagesPipeline)
     torch.nn.Module.__init__(pipeline)
     pipeline.distilled = True
+    pipeline.scheduler = object()
     pipeline.upsample_pipe = FakeUpsampler()
     object.__setattr__(pipeline, "_resolve_request_inputs", resolve_request_inputs)
     object.__setattr__(pipeline, "run_phase", run_phase)
